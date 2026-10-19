@@ -5,6 +5,7 @@ configurazione, messaggi, payload e chiamata HTTP.
 Import e gestione degli errori sono gia' presenti: conservarli.
 """
 
+import json
 import os
 
 import requests
@@ -32,14 +33,26 @@ payload = {
     "temperature": 0.2,
     "max_tokens": 300,
     "reasoning_effort": "none",
-    "stream": False,
+    "stream": True,
 }
 
 # --- Chiamata -------------------------------------------------------------
 try:
-    response = requests.post(f"{base_url}/v1/chat/completions", json=payload, timeout=60)
+    response = requests.post(
+        f"{base_url}/v1/chat/completions", json=payload, timeout=60, stream=True
+    )
     response.raise_for_status()
-    print(response.json()["choices"][0]["message"]["content"])
+    # Risposta in streaming (SSE): una riga "data: {...}" per ogni frammento.
+    for raw in response.iter_lines():
+        line = raw.decode("utf-8")
+        if not line.startswith("data: "):
+            continue
+        data = line[len("data: "):]
+        if data == "[DONE]":
+            break
+        delta = json.loads(data)["choices"][0]["delta"]
+        print(delta.get("content") or "", end="", flush=True)
+    print()
 except requests.exceptions.Timeout:
     print("Attesa scaduta: controllare server, carico e tempi.")
 except requests.exceptions.ConnectionError:
