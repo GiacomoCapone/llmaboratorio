@@ -16,9 +16,13 @@ base_url = os.environ["LM_BASE_URL"].rstrip("/")
 model = os.environ["LM_MODEL"]
 
 # --- Messaggi -------------------------------------------------------------
+question = input("Domanda: ").strip()
+if not question:
+    raise SystemExit("Domanda vuota: nessuna richiesta inviata.")
+
 messages = [
     {"role": "system", "content": "Sei un assistente conciso. Rispondi sempre in italiano."},
-    {"role": "user", "content": "Spiega in due frasi che cos'e' un modello linguistico."},
+    {"role": "user", "content": question},
 ]
 
 # --- Payload --------------------------------------------------------------
