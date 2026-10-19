@@ -55,6 +55,8 @@ In VS Code selezionare l'interprete `.venv` con **Python: Select Interpreter**.
 .\.venv\Scripts\python.exe client.py
 ```
 
+Si possono fare più domande di seguito: il client ricorda la conversazione finché resta aperto. Per uscire scrivere `esci` o premere Ctrl+C; alla chiusura la conversazione si perde.
+
 ## Diagnosi rapida
 
 | Messaggio | Primo controllo |
