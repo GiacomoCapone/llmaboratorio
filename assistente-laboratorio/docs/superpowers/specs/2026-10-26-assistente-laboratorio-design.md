@@ -1,6 +1,6 @@
 # Assistente del laboratorio: specifica
 
-Data: 2026-10-26. Stato: in attesa di approvazione.
+Data: 2026-10-26. Stato: approvata (con il campo `interrotto` aggiunto in fase di piano).
 
 ## Obiettivo
 Applicazione Python da terminale che conversa con un modello servito da LM Studio sull'host.
@@ -35,7 +35,7 @@ assistente-laboratorio/
 ```
 
 ## Grafo
-Stato: `messaggi` (reducer `add_messages`) e `passaggi` (int).
+Stato: `messaggi` (reducer `add_messages`), `passaggi` (int) e `interrotto` (bool, vero solo se il turno è finito in `limite`).
 
 - `START -> modello`.
 - Dopo `modello`:
