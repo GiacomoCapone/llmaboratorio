@@ -35,8 +35,12 @@ def test_il_modello_usa_lo_strumento_orologio(caplog):
             }
         )
 
+    assert not stato["interrotto"], "limite di passaggi raggiunto"
     assert "tool_call nome=ora_corrente" in caplog.text
     risultati = [m for m in stato["messaggi"] if isinstance(m, ToolMessage)]
     assert risultati, "nessun ToolMessage nello stato"
-    assert any(not str(m.content).startswith("Errore:") for m in risultati)
+    assert any(
+        not str(m.content).startswith("Errore:") and "+09:00" in str(m.content)
+        for m in risultati
+    ), "nessun risultato valido con l'offset di Tokyo (+09:00)"
     assert str(stato["messaggi"][-1].content).strip()
