@@ -66,8 +66,10 @@ I test non richiedono un modello attivo (esito verificato: 60 passati, 1 deselez
 ## Da verificare (non ancora eseguito)
 Su Python 3.14 sono verificati: l'installazione di `requirements.txt` in un `.venv` locale, i test
 automatici, `docker compose build` (immagine con Python 3.14.9) e l'avvio del container senza
-`LMSTUDIO_MODEL` (errore che cita la variabile, uscita 1). Non sono stati eseguiti l'avvio
-con `docker compose run` e la conversazione dal container.
+`LMSTUDIO_MODEL` (errore che cita la variabile, uscita 1). Il 2026-10-26 il container ha anche
+conversato con LM Studio sull'host (`docker run -i` con le variabili passate con `-e`): il modello
+ha chiamato `ora_corrente` con `Asia/Tokyo` e risposto con l'ora corretta. Non è stato eseguito
+`docker compose run`, perché richiede un `.env` reale.
 
 ```powershell
 docker compose build
@@ -81,7 +83,8 @@ La prova in Docker (raggiungibilità di LM Studio dal container, log) non è sta
 ## Verifiche reali
 Eseguite il 2026-10-26 con LM Studio sull'host (`http://localhost:1234/v1`) e il modello
 `google/gemma-4-e2b` (id restituito da `GET /v1/models`), variabili impostate nella sessione.
-Python 3.10, ambiente locale (non Docker); non ripetute dopo il passaggio a Python 3.14.
+Python 3.10, ambiente locale (non Docker). Dopo il passaggio a Python 3.14 la prova
+`pytest -m reale` è stata ripetuta con lo stesso modello: 1 passato.
 
 Prova automatica con modello reale (esclusa dall'esecuzione di default, marker `reale`):
 
