@@ -30,7 +30,7 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
 - Lavorare nel branch corrente; nessun branch o worktree nuovo se non richiesto.
 
 ## Scelte tecniche
-- Python, codice sincrono e moduli piccoli, con una separazione semplice tra
+- Python 3.14 (venv locale e immagine Docker), codice sincrono e moduli piccoli, con una separazione semplice tra
   grafo, collegamento al modello, strumenti e interfaccia da terminale.
 - LM Studio sull'host, raggiunto tramite la sua API compatibile con OpenAI.
 - Indirizzo del server e identificativo del modello solo da variabili d'ambiente.

@@ -6,7 +6,8 @@ persistenza). Il modello può chiamare lo strumento orologio (fuso orario esplic
 davvero dal programma. LM Studio resta sul computer host e non è containerizzato.
 
 ## Prerequisiti
-- Python (il container usa 3.12; l'ambiente locale verificato usa 3.10).
+- Python 3.14 (il container usa `python:3.14-slim`; in locale verificato con 3.14.7).
+  Creazione dell'ambiente: `py -3.14 -m venv .venv`.
 - LM Studio con il server locale attivo (porta 1234 di default) e un modello caricato.
 - Docker Desktop, solo per l'avvio con Compose.
 
@@ -63,10 +64,10 @@ errore che cita la variabile ed esce con codice 1.
 I test non richiedono un modello attivo (esito verificato: 60 passati, 1 deselezionato).
 
 ## Da verificare (non ancora eseguito)
-Il demone Docker non era in esecuzione al momento della scrittura: `Dockerfile`, `.dockerignore`
-e `compose.yaml` sono scritti, e `docker compose config` ne conferma la validità, ma la build e
-l'avvio **non sono stati eseguiti**. Anche l'installazione di `requirements.txt` su Python 3.12
-non è verificata.
+Su Python 3.14 sono verificati: l'installazione di `requirements.txt` in un `.venv` locale, i test
+automatici, `docker compose build` (immagine con Python 3.14.9) e l'avvio del container senza
+`LMSTUDIO_MODEL` (errore che cita la variabile, uscita 1). Non sono stati eseguiti l'avvio
+con `docker compose run` e la conversazione dal container.
 
 ```powershell
 docker compose build
@@ -80,7 +81,7 @@ La prova in Docker (raggiungibilità di LM Studio dal container, log) non è sta
 ## Verifiche reali
 Eseguite il 2026-10-26 con LM Studio sull'host (`http://localhost:1234/v1`) e il modello
 `google/gemma-4-e2b` (id restituito da `GET /v1/models`), variabili impostate nella sessione.
-Python 3.10, ambiente locale (non Docker).
+Python 3.10, ambiente locale (non Docker); non ripetute dopo il passaggio a Python 3.14.
 
 Prova automatica con modello reale (esclusa dall'esecuzione di default, marker `reale`):
 

@@ -77,7 +77,7 @@ La chiave API è un segnaposto fisso (richiesta dalla libreria, ignorata da LM S
 - livello da `LOG_LEVEL`.
 
 ## Docker
-- `Dockerfile` da `python:3.12-slim`, dipendenze da `requirements.txt` con versioni fissate, più
+- `Dockerfile` da `python:3.14-slim`, dipendenze da `requirements.txt` con versioni fissate, più
   `tzdata` (assente nell'immagine slim).
 - `compose.yaml` con un solo servizio `assistente`: `stdin_open`, `tty`, `env_file: .env`,
   `LMSTUDIO_BASE_URL` verso `host.docker.internal`, `extra_hosts: host.docker.internal:host-gateway`.
@@ -87,8 +87,8 @@ La chiave API è un segnaposto fisso (richiesta dalla libreria, ignorata da LM S
 
 ## Dipendenze
 `langgraph`, `langchain-openai`, `pytest`, più `tzdata` per i fusi su Windows e in Docker.
-Versioni esatte fissate nel piano dopo l'installazione verificata. Su Python 3.10 pip risolve
-`langgraph 1.2.17` e `langchain-openai 1.7.2`; l'immagine Docker usa Python 3.12.
+Versioni esatte fissate nel piano dopo l'installazione verificata. Su Python 3.14 pip risolve
+`langgraph 1.2.17` e `langchain-openai 1.7.2`; l'immagine Docker usa Python 3.14.
 
 ## Test automatici (senza modello attivo)
 Con un LLM finto che restituisce risposte predeterminate:

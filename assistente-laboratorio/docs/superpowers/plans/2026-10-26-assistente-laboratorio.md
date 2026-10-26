@@ -6,7 +6,7 @@
 
 **Architecture:** Ciclo `modello -> (strumenti -> modello)* -> fine`, con ramo `limite` quando il modello chiede ancora lo strumento oltre `MAX_PASSAGGI`. Moduli piccoli e sincroni: `config`, `modello`, `strumenti`, `grafo`, `cli`. L'LLM e l'orologio sono iniettati, così i test non richiedono il modello.
 
-**Tech Stack:** Python (3.10 in locale, 3.12 in Docker), `langgraph`, `langchain-openai`, `httpx`, `tzdata`, `pytest`.
+**Tech Stack:** Python 3.14 (locale e Docker), `langgraph`, `langchain-openai`, `httpx`, `tzdata`, `pytest`.
 
 **Spec:** `assistente-laboratorio/docs/superpowers/specs/2026-10-26-assistente-laboratorio-design.md`
 
@@ -17,7 +17,7 @@
 - Indirizzo del server e identificativo del modello solo da variabili d'ambiente: `LMSTUDIO_BASE_URL` (obbligatoria), `LMSTUDIO_MODEL` (obbligatoria, mai un valore inventato), `MAX_PASSAGGI` (predefinito 5, intero positivo), `LOG_LEVEL` (predefinito `INFO`).
 - Chiave API: segnaposto fisso `lm-studio`. `.env.example` senza credenziali; `.env`, `.venv`, cache fuori da Git.
 - Log con `logging` su stderr (`%(asctime)s %(levelname)s %(name)s %(message)s`); conversazione su stdout.
-- Dipendenze con versioni fissate: `langgraph==1.2.17`, `langchain-openai==1.7.2` (risolvibili su Python 3.10), le altre fissate da `pip freeze` nel Task 1.
+- Dipendenze con versioni fissate: `langgraph==1.2.17`, `langchain-openai==1.7.2` (risolvibili su Python 3.14), le altre fissate da `pip freeze` nel Task 1.
 - Test automatici senza modello attivo; prove reali marcate `reale`, escluse di default.
 - Commit: Conventional Commits in italiano, `git status` e controllo del diff prima di ogni commit, staging selettivo, trailer `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`. Nessun push.
 - Il README riporta solo comandi realmente eseguiti, con variante PowerShell.
@@ -194,9 +194,9 @@ Anche `MAX_PASSAGGI` alto rispetto al limite di ricorsione di LangGraph è coper
 **Interfaces:**
 - Consumes: `python -m assistente`, `requirements.txt`, `.env`.
 
-- [ ] **Step 1: Scrivere `Dockerfile`**: base `python:3.12-slim`, `ENV PYTHONPATH=/app/src PYTHONUNBUFFERED=1`, copia di `requirements.txt` e `pip install --no-cache-dir -r requirements.txt` (include `tzdata`), copia di `src/`, `CMD ["python", "-m", "assistente"]`. `.dockerignore`: `.venv`, `.env`, `tests`, `docs`, `__pycache__`, `.git`.
+- [ ] **Step 1: Scrivere `Dockerfile`**: base `python:3.14-slim`, `ENV PYTHONPATH=/app/src PYTHONUNBUFFERED=1`, copia di `requirements.txt` e `pip install --no-cache-dir -r requirements.txt` (include `tzdata`), copia di `src/`, `CMD ["python", "-m", "assistente"]`. `.dockerignore`: `.venv`, `.env`, `tests`, `docs`, `__pycache__`, `.git`.
 - [ ] **Step 2: Scrivere `compose.yaml`**: servizio `assistente`, `build: .`, `stdin_open: true`, `tty: true`, `env_file: .env`, `environment: LMSTUDIO_BASE_URL: http://host.docker.internal:1234/v1` (sovrascrive il valore dell'`.env` locale), `extra_hosts: ["host.docker.internal:host-gateway"]`.
-- [ ] **Step 3: Verificare la build**: `docker compose build`; atteso: immagine costruita senza errori. Se le versioni congelate su Python 3.10 non si installano su 3.12, correggere `requirements.txt` e ripetere.
+- [ ] **Step 3: Verificare la build**: `docker compose build`; atteso: immagine costruita senza errori. Se le versioni congelate su Python 3.14 non si installano, correggere `requirements.txt` e ripetere.
 - [ ] **Step 4: Verificare l'errore di configurazione nel container**: senza `LMSTUDIO_MODEL` nell'`.env`, `docker compose run --rm assistente`; atteso: messaggio che cita `LMSTUDIO_MODEL`, codice di uscita 1.
 - [ ] **Step 5: Scrivere `README.md`** con: scopo, prerequisiti, configurazione (`Copy-Item .env.example .env` per PowerShell, `cp` per Bash; come ottenere l'id con `curl http://localhost:1234/v1/models` e `Invoke-RestMethod`), installazione locale (venv, `pip install -r requirements-dev.txt`), avvio locale, avvio con Compose, test (`python -m pytest`), diagnosi (server non raggiungibile, modello non trovato, container che non vede l'host, LM Studio in ascolto solo su loopback, tool calling non supportato dal modello). Includere solo comandi eseguiti nei Task 1-6 o nel Task 7.
 - [ ] **Step 6: Commit** `feat(docker): aggiunge Dockerfile, Compose e README`. Controllare con `git status` che `.env` non sia in staging.
