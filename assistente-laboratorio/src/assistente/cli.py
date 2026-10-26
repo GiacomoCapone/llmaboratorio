@@ -12,8 +12,11 @@ from assistente.config import ErroreConfigurazione, carica_config
 from assistente.grafo import build_graph
 from assistente.modello import ErroreModello, crea_llm, verifica_modello
 
+logger = logging.getLogger("assistente.cli")
+
 COMANDI_USCITA = {"esci", "exit", "quit"}
 MESSAGGIO_RISPOSTA_VUOTA = "(il modello non ha prodotto una risposta)"
+MESSAGGIO_TURNO_ANNULLATO = "(turno annullato)"
 
 
 @dataclass
@@ -52,7 +55,11 @@ def ciclo(grafo, leggi: Callable[[], str], scrivi: Callable[[str], None]) -> Non
             break
         try:
             esito = esegui_turno(grafo, cronologia, riga)
+        except KeyboardInterrupt:  # Ctrl-C annulla il turno, non la sessione
+            scrivi(MESSAGGIO_TURNO_ANNULLATO)
+            continue
         except Exception as errore:  # il turno fallito viene scartato
+            logger.warning("turno fallito: %s", errore)
             scrivi(f"Errore: {errore}")
             continue
         cronologia = esito.cronologia
@@ -70,12 +77,15 @@ def main() -> int:
             stream=sys.stderr,
         )
         verifica_modello(config)
+        grafo = build_graph(
+            crea_llm(config), lambda: datetime.now(timezone.utc), config.max_passaggi
+        )
+        print("Assistente del laboratorio. Scrivere 'esci' per terminare.")
+        ciclo(grafo, lambda: input("> "), print)
     except (ErroreConfigurazione, ErroreModello) as errore:
         print(f"Errore: {errore}", file=sys.stderr)
         return 1
-    grafo = build_graph(
-        crea_llm(config), lambda: datetime.now(timezone.utc), config.max_passaggi
-    )
-    print("Assistente del laboratorio. Scrivere 'esci' per terminare.")
-    ciclo(grafo, lambda: input("> "), print)
+    except KeyboardInterrupt:
+        print("Interrotto.", file=sys.stderr)
+        return 130
     return 0

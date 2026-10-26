@@ -108,6 +108,36 @@ def test_input_vuoto_e_uscita():
         assert llm.chiamate == []
 
 
+class LlmCtrlCIniziale(LlmFinto):
+    def invoke(self, messaggi):
+        if not self.chiamate:
+            self.chiamate.append(list(messaggi))
+            raise KeyboardInterrupt
+        return super().invoke(messaggi)
+
+
+def test_ctrl_c_durante_il_turno_annulla_solo_il_turno():
+    llm = LlmCtrlCIniziale([AIMessage("Risposta valida")])
+    grafo = build_graph(llm, ADESSO, 5)
+    uscite = []
+    ciclo(grafo, leggi_da(["Prima", "Seconda", "esci"]), uscite.append)
+    assert any("annullato" in u for u in uscite)
+    assert "Risposta valida" in uscite
+    assert "Prima" not in unisci_testo(llm.chiamate[-1])
+
+
+def test_main_ctrl_c_all_avvio(monkeypatch, capsys):
+    monkeypatch.setenv("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
+    monkeypatch.setenv("LMSTUDIO_MODEL", "modello-finto")
+
+    def interrompi(config):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("assistente.cli.verifica_modello", interrompi)
+    assert main() == 130
+    assert capsys.readouterr().err.strip() != ""
+
+
 def test_main_configurazione_mancante(monkeypatch, capsys):
     monkeypatch.delenv("LMSTUDIO_MODEL", raising=False)
     monkeypatch.setenv("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
