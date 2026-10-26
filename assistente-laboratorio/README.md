@@ -29,6 +29,10 @@ Invoke-RestMethod http://localhost:1234/v1/models
 curl http://localhost:1234/v1/models
 ```
 
+I quattro comandi sopra sono stati eseguiti il 2026-10-26 (il `.env` creato per la prova è stato
+poi rimosso); `curl` va lanciato da bash, perché in Windows PowerShell 5.1 `curl` è un alias di
+`Invoke-WebRequest`.
+
 Variabili: `LMSTUDIO_BASE_URL` (default nell'esempio `http://localhost:1234/v1`), `LMSTUDIO_MODEL`
 (obbligatoria), `MAX_PASSAGGI` (default 5), `LOG_LEVEL` (default INFO).
 
@@ -56,7 +60,7 @@ errore che cita la variabile ed esce con codice 1.
 ```powershell
 .venv\Scripts\python.exe -m pytest
 ```
-I test non richiedono un modello attivo (esito verificato: 53 passati).
+I test non richiedono un modello attivo (esito verificato: 60 passati, 1 deselezionato).
 
 ## Da verificare (non ancora eseguito)
 Il demone Docker non era in esecuzione al momento della scrittura: `Dockerfile`, `.dockerignore`
@@ -85,11 +89,14 @@ $env:LMSTUDIO_BASE_URL = "http://localhost:1234/v1"
 $env:LMSTUDIO_MODEL = "google/gemma-4-e2b"
 .venv\Scripts\python.exe -m pytest -m reale -v
 ```
-Esito: `1 passed, 53 deselected in 37.66s`. Il modello ha emesso la tool call
-`ora_corrente`, lo strumento ha restituito un risultato valido e la risposta finale non era vuota.
+Esito: `1 passed, 53 deselected in 37.66s`; ripetuta dopo l'aggiunta dei controlli sul turno non
+interrotto e sull'offset `+09:00`: `1 passed, 60 deselected in 34.64s`. Il modello ha emesso la
+tool call `ora_corrente`, lo strumento ha restituito l'ora di Tokyo, il turno non è stato
+interrotto dal limite e la risposta finale non era vuota.
 
 Prova manuale (`python -m assistente`, input da pipe: «Che ore sono a Tokyo?», poi «Qual era la
-città di cui ti ho appena chiesto l'ora?», poi `esci`; uscita 0). Su stderr:
+città di cui ti ho appena chiesto l'ora?», poi `esci`; uscita 0). Estratto da stderr (le righe
+reali iniziano anche con data e ora, nel formato `%(asctime)s %(levelname)s %(name)s %(message)s`):
 
 ```
 INFO assistente.grafo tool_call nome=ora_corrente args={'fuso': 'Asia/Tokyo'}
@@ -111,3 +118,9 @@ Non verificato: avvio con Docker (vedi sezione precedente).
   in LM Studio l'ascolto sulla rete locale (serve su `0.0.0.0`).
 - **Tool calling non supportato dal modello**: il modello non richiamerà l'orologio; scegliere
   un modello che supporti l'uso di strumenti.
+- **Argomenti della tool call non in JSON valido**: il programma risponde al modello con un
+  errore (riga `WARNING ... tool_call non valida` nel log) e il modello può riprovare, entro
+  `MAX_PASSAGGI`.
+- **Ctrl-C**: durante una risposta annulla solo il turno (`(turno annullato)`, cronologia
+  invariata); all'avvio termina il programma con codice 130. Questi due comportamenti sono
+  coperti dai test automatici, non provati a mano con LM Studio.
