@@ -71,8 +71,35 @@ docker compose run --rm assistente
 Il servizio imposta `LMSTUDIO_BASE_URL=http://host.docker.internal:1234/v1`, che prevale
 sul valore del file `.env`. Atteso senza `LMSTUDIO_MODEL`: errore che cita la variabile, uscita 1.
 
-Anche le prove reali con LM Studio (conversazione e uso dello strumento orologio da parte del
-modello) restano da eseguire.
+La prova in Docker (raggiungibilità di LM Studio dal container, log) non è stata eseguita.
+
+## Verifiche reali
+Eseguite il 2026-10-26 con LM Studio sull'host (`http://localhost:1234/v1`) e il modello
+`google/gemma-4-e2b` (id restituito da `GET /v1/models`), variabili impostate nella sessione.
+Python 3.10, ambiente locale (non Docker).
+
+Prova automatica con modello reale (esclusa dall'esecuzione di default, marker `reale`):
+
+```powershell
+$env:LMSTUDIO_BASE_URL = "http://localhost:1234/v1"
+$env:LMSTUDIO_MODEL = "google/gemma-4-e2b"
+.venv\Scripts\python.exe -m pytest -m reale -v
+```
+Esito: `1 passed, 53 deselected in 37.66s`. Il modello ha emesso la tool call
+`ora_corrente`, lo strumento ha restituito un risultato valido e la risposta finale non era vuota.
+
+Prova manuale (`python -m assistente`, input da pipe: «Che ore sono a Tokyo?», poi «Qual era la
+città di cui ti ho appena chiesto l'ora?», poi `esci`; uscita 0). Su stderr:
+
+```
+INFO assistente.grafo tool_call nome=ora_corrente args={'fuso': 'Asia/Tokyo'}
+INFO assistente.grafo tool_result nome=ora_corrente risultato=2026-10-27T01:16:35.884258+09:00
+```
+Risposte: «Attualmente a Tokyo sono le ore **01:16** del 27 ottobre 2026.» e, per la seconda
+domanda, «La città di cui mi hai appena chiesto l'ora era **Tokyo**.» (cronologia di sessione
+funzionante). Una sola esecuzione per prova: non è una misura di affidabilità del modello.
+
+Non verificato: avvio con Docker (vedi sezione precedente).
 
 ## Diagnosi
 - **Server non raggiungibile**: verificare che il server locale di LM Studio sia attivo e che
