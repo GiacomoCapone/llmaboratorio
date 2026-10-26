@@ -1,0 +1,11 @@
+services:
+  assistente:
+    build: .
+    stdin_open: true
+    tty: true
+    env_file: .env
+    environment:
+      # Sovrascrive il valore dell'.env locale: dal container l'host è host.docker.internal
+      LMSTUDIO_BASE_URL: http://host.docker.internal:1234/v1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
