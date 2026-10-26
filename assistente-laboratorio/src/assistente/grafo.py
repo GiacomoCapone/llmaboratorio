@@ -29,7 +29,9 @@ def instrada_dopo_modello(
 ) -> Literal["strumenti", "limite", "fine"]:
     """Decide il nodo successivo in base all'ultimo messaggio del modello."""
     ultimo = stato["messaggi"][-1]
-    if not getattr(ultimo, "tool_calls", None):
+    if not (
+        getattr(ultimo, "tool_calls", None) or getattr(ultimo, "invalid_tool_calls", None)
+    ):
         return "fine"
     if stato["passaggi"] < max_passaggi:
         return "strumenti"
@@ -59,14 +61,33 @@ def build_graph(llm, adesso: Callable[[], datetime], max_passaggi: int):
         return {"messaggi": [llm_con_strumenti.invoke(stato["messaggi"])]}
 
     def strumenti(stato: Stato) -> dict:
+        ultimo = stato["messaggi"][-1]
         risultati = []
-        for chiamata in stato["messaggi"][-1].tool_calls:
+        for chiamata in ultimo.tool_calls:
             nome, args = chiamata.get("name"), chiamata.get("args")
             logger.info("tool_call nome=%s args=%s", nome, args)
             testo = _esegui_strumento(nome, args, adesso)
             logger.info("tool_result nome=%s risultato=%s", nome, testo)
             risultati.append(
                 ToolMessage(content=testo, tool_call_id=chiamata["id"], name=nome)
+            )
+        # Argomenti non JSON: langchain li mette in invalid_tool_calls; si risponde
+        # comunque, così il modello può correggersi e la cronologia resta coerente.
+        for indice, chiamata in enumerate(getattr(ultimo, "invalid_tool_calls", None) or []):
+            nome = chiamata.get("name")
+            id_chiamata = chiamata.get("id") or f"non_valida_{stato['passaggi']}_{indice}"
+            logger.warning(
+                "tool_call non valida nome=%s args=%r", nome, chiamata.get("args")
+            )
+            risultati.append(
+                ToolMessage(
+                    content=(
+                        "Errore: argomenti non in formato JSON valido. "
+                        "Riprovare con un oggetto JSON come {\"fuso\": \"Europe/Rome\"}."
+                    ),
+                    tool_call_id=id_chiamata,
+                    name=nome or "sconosciuto",
+                )
             )
         return {"messaggi": risultati, "passaggi": stato["passaggi"] + 1}
 

@@ -34,3 +34,18 @@ def richiesta_ora(fuso, id: str = "c1") -> AIMessage:
         content="",
         tool_calls=[{"name": NOME_ORA_CORRENTE, "args": {"fuso": fuso}, "id": id}],
     )
+
+
+def richiesta_malformata(id: str | None = "c1") -> AIMessage:
+    """Tool call con argomenti non JSON: langchain la mette in invalid_tool_calls."""
+    return AIMessage(
+        content="",
+        invalid_tool_calls=[
+            {
+                "name": NOME_ORA_CORRENTE,
+                "args": '{"fuso": "Europe/Rome"',
+                "id": id,
+                "error": "JSON non valido",
+            }
+        ],
+    )

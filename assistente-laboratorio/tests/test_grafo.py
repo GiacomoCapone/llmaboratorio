@@ -5,7 +5,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from assistente.grafo import MESSAGGIO_LIMITE, build_graph, instrada_dopo_modello
-from finti import LlmFinto, richiesta_ora
+from finti import LlmFinto, richiesta_malformata, richiesta_ora
 
 ADESSO = lambda: datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)  # noqa: E731
 
@@ -119,6 +119,37 @@ def test_argomenti_extra_ignorati():
     assert stato["messaggi"][-1].content == "Ok."
 
 
+def test_argomenti_json_malformati():
+    llm = LlmFinto([richiesta_malformata("c1"), AIMessage("Riprovo con il fuso.")])
+    stato = esegui(llm)
+    tool = tool_messages(stato)
+    assert len(tool) == 1
+    assert tool[0].tool_call_id == "c1"
+    assert tool[0].content.startswith("Errore:")
+    assert "JSON" in tool[0].content
+    assert any(isinstance(m, ToolMessage) for m in llm.chiamate[1])
+    assert stato["messaggi"][-1].content == "Riprovo con il fuso."
+    assert stato["passaggi"] == 1
+    assert stato["interrotto"] is False
+
+
+def test_argomenti_json_malformati_senza_id():
+    llm = LlmFinto([richiesta_malformata(None), AIMessage("Ok.")])
+    stato = esegui(llm)
+    tool = tool_messages(stato)
+    assert len(tool) == 1
+    assert tool[0].tool_call_id
+    assert stato["messaggi"][-1].content == "Ok."
+
+
+def test_argomenti_json_malformati_ripetuti_raggiungono_il_limite():
+    llm = LlmFinto([richiesta_malformata()], ripeti_ultima=True)
+    stato = esegui(llm, max_passaggi=2)
+    assert stato["interrotto"] is True
+    assert stato["passaggi"] == 2
+    assert MESSAGGIO_LIMITE in stato["messaggi"][-1].content
+
+
 def test_limite_raggiunto(caplog):
     llm = LlmFinto([richiesta_ora("UTC")], ripeti_ultima=True)
     with caplog.at_level(logging.INFO, logger="assistente.grafo"):
@@ -150,6 +181,8 @@ def test_limite_alto_non_supera_la_ricorsione():
         (AIMessage("risposta"), 0, "fine"),
         (richiesta_ora("UTC"), 1, "strumenti"),
         (richiesta_ora("UTC"), 3, "limite"),
+        (richiesta_malformata(), 1, "strumenti"),
+        (richiesta_malformata(), 3, "limite"),
     ],
 )
 def test_instradamento(ultimo, passaggi, atteso):
