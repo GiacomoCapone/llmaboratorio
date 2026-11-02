@@ -87,11 +87,18 @@ Il modello li richiede tramite tool calling; il programma li esegue davvero (reg
   è respinto con un messaggio che il modello può usare per correggersi, per esempio
   `Errore: carattere non ammesso 'x' in posizione 3. Sono ammessi numeri, + - * / e parentesi.`
 
+- **Convertitore** (`converti_unita`): converte fra unità SI con i loro prefissi (le 7 di base e le
+  22 derivate con nome, per esempio km, mg, µs, kPa, MW, GHz, kΩ), aree e volumi di lunghezza
+  (`cm²`, `m³`, anche `cm2` o `cm^2`) e temperature in `K` e `°C`; decimali esatti. I simboli
+  distinguono maiuscole e minuscole (`mW` milliwatt, `MW` megawatt); `u` vale come `µ`, `ohm` come
+  `Ω`. Non accetta unità non SI (ore, litri, km/h, unità imperiali) né conversioni fra grandezze
+  diverse, per esempio `Errore: non si può convertire 'kg' (massa) in 'm' (lunghezza): grandezze diverse.`
+
 ## Test
 ```powershell
 .venv\Scripts\python.exe -m pytest
 ```
-I test non richiedono un modello attivo (esito verificato il 2026-11-02: 150 passati, 5 deselezionati).
+I test non richiedono un modello attivo (esito verificato il 2026-11-02: 247 passati, 7 deselezionati).
 
 ## Da verificare (non ancora eseguito)
 Su Python 3.14 sono verificati: l'installazione di `requirements.txt` in un `.venv` locale, i test
@@ -159,6 +166,12 @@ log è comparsa una volta la riga `risposta vuota dopo gli strumenti` (vedi Diag
 
 Dal 2026-11-02 le prove reali leggono anch'esse il `.env`: `.venv\Scripts\python.exe -m pytest -m reale`
 senza variabili impostate → `5 passed, 147 deselected in 68.10s`.
+
+Il 2026-11-02, con tre strumenti (orologio, calcolatrice, convertitore): `python -m pytest -m reale -v -s`
+→ 7 passate, compresi «Quanti metri sono 2,5 km?» (`2500 m`) e «Quanti gradi Celsius sono 300 K?»
+(`26.85 °C`); turni fra 3 e 8 s. Prova manuale con `python avvia.py` e le tre domande «Quanti metri
+sono 2,5 km?», «Quanto fa 12,5 * 4?», «che ore sono» nella stessa sessione: risposte corrette, ognuna
+con la tool call dello strumento giusto.
 
 Non verificato: avvio con Docker (vedi sezione precedente; il 2026-11-02 Docker Desktop non era attivo).
 L'immagine va ricostruita (`docker compose build`) perché `requirements.txt` ora include `python-dotenv`.

@@ -24,6 +24,7 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
 - offre uno strumento orologio con fuso orario esplicito, richiesto dal modello tramite tool calling
   ed eseguito davvero dal programma;
 - offre una calcolatrice sicura (quattro operazioni e parentesi, decimali esatti, senza `eval`);
+- offre un convertitore di unità SI (unità di base e derivate con prefisso, aree, volumi, K e °C);
 - si avvia anche con Docker Compose.
 
 ## Confini
