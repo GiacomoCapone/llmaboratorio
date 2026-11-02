@@ -8,8 +8,10 @@ Grammatica (operatori associativi a sinistra):
 """
 
 import re
-from decimal import ROUND_HALF_EVEN, Decimal, localcontext
+from decimal import Decimal
 from typing import NamedTuple
+
+from assistente.strumenti.numeri import contesto, formatta
 
 NOME_CALCOLA = "calcola"
 LUNGHEZZA_MASSIMA = 200
@@ -140,12 +142,6 @@ class _Parser:
         )
 
 
-def _formatta(valore: Decimal) -> str:
-    if valore == 0:
-        return "0"
-    return format(valore.normalize(), "f")
-
-
 def calcola(espressione: str) -> str:
     """Risultato esatto dell'espressione oppure un testo 'Errore: ...'; non solleva eccezioni."""
     if not espressione.strip():
@@ -153,9 +149,9 @@ def calcola(espressione: str) -> str:
     if len(espressione) > LUNGHEZZA_MASSIMA:
         return f"Errore: espressione troppo lunga (massimo {LUNGHEZZA_MASSIMA} caratteri)."
     try:
-        with localcontext(prec=28, rounding=ROUND_HALF_EVEN):
+        with contesto():
             token = _tokenizza(espressione)
-            return _formatta(_Parser(token, len(espressione) + 1).analizza())
+            return formatta(_Parser(token, len(espressione) + 1).analizza())
     except _ErroreCalcolo as errore:
         return f"Errore: {errore}"
 
