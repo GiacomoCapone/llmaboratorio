@@ -1,6 +1,6 @@
 # Calcolatrice sicura e registro degli strumenti: specifica
 
-Data: 2026-11-02. Stato: da approvare.
+Data: 2026-11-02. Stato: approvata (2026-11-02).
 
 ## Contesto
 Primo di sei cicli (specifica → piano → implementazione) concordati il 2026-11-02 per i nuovi strumenti:
