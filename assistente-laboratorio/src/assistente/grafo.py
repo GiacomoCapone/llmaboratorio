@@ -37,6 +37,14 @@ def instrada_dopo_modello(
     return "limite"
 
 
+def _vuota(risposta) -> bool:
+    """Risposta senza tool call e senza testo (stringa vuota o di soli spazi, o lista vuota)."""
+    if getattr(risposta, "tool_calls", None) or getattr(risposta, "invalid_tool_calls", None):
+        return False
+    contenuto = risposta.content
+    return not contenuto.strip() if isinstance(contenuto, str) else not contenuto
+
+
 def _esegui_strumento(strumenti: dict[str, Strumento], nome, args) -> str:
     """Esegue uno strumento del registro; ogni problema diventa un testo 'Errore: ...'."""
     strumento = strumenti.get(nome)
@@ -56,7 +64,15 @@ def build_graph(llm, strumenti: dict[str, Strumento], max_passaggi: int):
     llm_con_strumenti = llm.bind_tools([s.definizione for s in strumenti.values()])
 
     def modello(stato: Stato) -> dict:
-        return {"messaggi": [llm_con_strumenti.invoke(stato["messaggi"])]}
+        risposta = llm_con_strumenti.invoke(stato["messaggi"])
+        # Con più strumenti collegati alcuni modelli piccoli (gemma-4-e2b) rispondono ai
+        # risultati con un testo vuoto: si richiama una volta il modello senza strumenti.
+        if isinstance(stato["messaggi"][-1], ToolMessage) and _vuota(risposta):
+            logger.warning(
+                "risposta vuota dopo gli strumenti: nuova chiamata senza strumenti"
+            )
+            risposta = llm.invoke(stato["messaggi"])
+        return {"messaggi": [risposta]}
 
     def esegui_strumenti(stato: Stato) -> dict:
         ultimo = stato["messaggi"][-1]

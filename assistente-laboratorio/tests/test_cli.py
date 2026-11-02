@@ -67,11 +67,11 @@ def test_turno_interrotto_non_entra_in_cronologia():
 
 
 class LlmErroreIniziale(LlmFinto):
-    def invoke(self, messaggi):
+    def _rispondi(self, messaggi, con_strumenti):
         if not self.chiamate:
             self.chiamate.append(list(messaggi))
             raise RuntimeError("connessione")
-        return super().invoke(messaggi)
+        return super()._rispondi(messaggi, con_strumenti)
 
 
 def test_errore_del_modello_non_chiude_la_sessione():
@@ -110,11 +110,11 @@ def test_input_vuoto_e_uscita():
 
 
 class LlmCtrlCIniziale(LlmFinto):
-    def invoke(self, messaggi):
+    def _rispondi(self, messaggi, con_strumenti):
         if not self.chiamate:
             self.chiamate.append(list(messaggi))
             raise KeyboardInterrupt
-        return super().invoke(messaggi)
+        return super()._rispondi(messaggi, con_strumenti)
 
 
 def test_ctrl_c_durante_il_turno_annulla_solo_il_turno():

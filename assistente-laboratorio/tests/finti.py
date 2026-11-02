@@ -11,13 +11,18 @@ class LlmFinto:
         self.ripeti_ultima = ripeti_ultima
         self.chiamate: list[list] = []
         self.strumenti: list = []
+        self.con_strumenti: list[bool] = []  # per invocazione: con o senza strumenti
         self._indice = 0
 
-    def bind_tools(self, tools) -> "LlmFinto":
+    def bind_tools(self, tools) -> "_LlmLegato":
         self.strumenti = list(tools)
-        return self
+        return _LlmLegato(self)
 
     def invoke(self, messaggi) -> AIMessage:
+        return self._rispondi(messaggi, con_strumenti=False)
+
+    def _rispondi(self, messaggi, con_strumenti: bool) -> AIMessage:
+        self.con_strumenti.append(con_strumenti)
         self.chiamate.append(list(messaggi))
         if self._indice < len(self.risposte):
             risposta = self.risposte[self._indice]
@@ -29,6 +34,16 @@ class LlmFinto:
         # Come un modello vero, ogni invocazione produce un messaggio nuovo: senza
         # copia, add_messages (che deduplica per id) sostituirebbe la ripetizione.
         return risposta.model_copy(update={"id": None}, deep=True)
+
+
+class _LlmLegato:
+    """Vista restituita da bind_tools: le invocazioni risultano fatte con gli strumenti."""
+
+    def __init__(self, base: LlmFinto):
+        self.base = base
+
+    def invoke(self, messaggi) -> AIMessage:
+        return self.base._rispondi(messaggi, con_strumenti=True)
 
 
 def richiesta(nome: str, args, id: str = "c1") -> AIMessage:

@@ -248,3 +248,37 @@ def test_due_strumenti_nella_stessa_risposta():
     tool = tool_messages(stato)
     assert [m.tool_call_id for m in tool] == ["c1", "c2"]
     assert [m.content for m in tool] == ["2026-01-15T13:00:00+01:00", "0.25"]
+
+
+def test_risposta_vuota_dopo_strumenti_ripete_senza_strumenti(caplog):
+    llm = LlmFinto(
+        [richiesta("calcola", {"espressione": "2+2"}), AIMessage(""), AIMessage("Fa 4.")]
+    )
+    with caplog.at_level(logging.WARNING, logger="assistente.grafo"):
+        stato = esegui(llm)
+    assert stato["messaggi"][-1].content == "Fa 4."
+    assert llm.con_strumenti == [True, True, False]
+    vuote = [
+        m
+        for m in stato["messaggi"]
+        if isinstance(m, AIMessage) and not m.tool_calls and not m.content
+    ]
+    assert vuote == []
+    assert stato["passaggi"] == 1
+    assert "risposta vuota dopo gli strumenti" in caplog.text
+
+
+def test_risposta_vuota_ripetuta_una_sola_volta():
+    llm = LlmFinto(
+        [richiesta("calcola", {"espressione": "2+2"}), AIMessage(""), AIMessage("  ")]
+    )
+    stato = esegui(llm)
+    assert llm.con_strumenti == [True, True, False]
+    assert stato["messaggi"][-1].content == "  "
+
+
+def test_risposta_vuota_senza_strumenti_non_ripete():
+    llm = LlmFinto([AIMessage("")])
+    stato = esegui(llm)
+    assert llm.con_strumenti == [True]
+    assert stato["messaggi"][-1].content == ""
