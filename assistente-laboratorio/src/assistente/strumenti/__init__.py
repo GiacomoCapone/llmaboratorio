@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from assistente.strumenti.calcolatrice import DEFINIZIONE_CALCOLA, esegui_calcola
+from assistente.strumenti.convertitore import DEFINIZIONE_CONVERTI, esegui_converti
 from assistente.strumenti.orologio import definizione_ora_corrente, esegui_ora_corrente
 
 
@@ -18,6 +19,16 @@ class Strumento:
         return self.definizione["function"]["name"]
 
 
+def registro(strumenti: list[Strumento]) -> dict[str, Strumento]:
+    """Registro per nome, nell'ordine dato; un nome ripetuto è un errore di programmazione."""
+    per_nome: dict[str, Strumento] = {}
+    for strumento in strumenti:
+        if strumento.nome in per_nome:
+            raise ValueError(f"nome duplicato nel registro: '{strumento.nome}'")
+        per_nome[strumento.nome] = strumento
+    return per_nome
+
+
 def crea_strumenti(
     adesso: Callable[[], datetime], fuso_predefinito: str
 ) -> dict[str, Strumento]:
@@ -28,5 +39,6 @@ def crea_strumenti(
             lambda args: esegui_ora_corrente(args, adesso, fuso_predefinito),
         ),
         Strumento(DEFINIZIONE_CALCOLA, esegui_calcola),
+        Strumento(DEFINIZIONE_CONVERTI, esegui_converti),
     ]
-    return {s.nome: s for s in strumenti}
+    return registro(strumenti)

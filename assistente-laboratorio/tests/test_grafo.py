@@ -282,3 +282,14 @@ def test_risposta_vuota_senza_strumenti_non_ripete():
     stato = esegui(llm)
     assert llm.con_strumenti == [True]
     assert stato["messaggi"][-1].content == ""
+
+
+def test_tool_call_converti_unita():
+    llm = LlmFinto(
+        [
+            richiesta("converti_unita", {"valore": 2.5, "da": "km", "a": "m"}),
+            AIMessage("Sono 2500 m."),
+        ]
+    )
+    stato = esegui(llm, testo="Quanti metri sono 2,5 km?")
+    assert tool_messages(stato)[0].content == "2500 m"
