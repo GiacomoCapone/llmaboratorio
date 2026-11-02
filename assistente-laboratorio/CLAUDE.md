@@ -11,7 +11,8 @@ La cartella del progetto è `assistente-laboratorio/`.
 - Test automatici (senza modello): `python -m pytest`.
 - Prova reale con LM Studio attivo e `LMSTUDIO_BASE_URL`/`LMSTUDIO_MODEL` nel `.env` (o nell'ambiente):
   `python -m pytest -m reale -v` (esclusa di default).
-- Avvio: `.venv\Scripts\python.exe avvia.py` (legge il `.env`, senza variabili né `PYTHONPATH`);
+- Avvio: `python avvia.py` da qualunque cartella (usa il `.venv`, legge il `.env` del progetto,
+  senza variabili né `PYTHONPATH`);
   con Docker: `docker compose run --rm assistente`.
 - Dettagli di configurazione e diagnosi nel `README.md`.
 

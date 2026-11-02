@@ -34,8 +34,8 @@ I quattro comandi sopra sono stati eseguiti il 2026-10-26 (il `.env` creato per 
 poi rimosso); `curl` va lanciato da bash, perché in Windows PowerShell 5.1 `curl` è un alias di
 `Invoke-WebRequest`.
 
-Il programma legge il file `.env` della cartella da cui viene avviato (con `python-dotenv`): non
-serve impostare variabili nella sessione. Una variabile già presente nell'ambiente prevale sul
+Il programma legge il file `.env` della cartella del progetto (con `python-dotenv`), da qualunque
+cartella venga avviato: non serve impostare variabili nella sessione. Una variabile già presente nell'ambiente prevale sul
 valore del file; così Docker Compose imposta l'indirizzo dell'host per il container.
 
 Variabili: `LMSTUDIO_BASE_URL` (default nell'esempio `http://localhost:1234/v1`), `LMSTUDIO_MODEL`
@@ -58,15 +58,18 @@ python -m venv .venv
 ```
 
 ## Avvio locale
-Dalla cartella `assistente-laboratorio/`, con il file `.env` compilato:
+Con il file `.env` compilato e il `.venv` installato:
 
 ```powershell
-.venv\Scripts\python.exe avvia.py
+python avvia.py
 ```
 
-`avvia.py` aggiunge `src` al percorso di Python, quindi non serve `PYTHONPATH`. Verificato il
-2026-11-02 da una sessione PowerShell senza variabili impostate: «Quanto fa 12,5 * 4?» → `50`.
-In alternativa resta `python -m assistente` con `$env:PYTHONPATH = "src"`.
+Il comando funziona da qualunque cartella (indicando il percorso dello script, per esempio
+`python .\assistente-laboratorio\avvia.py`) e con qualunque Python 3: se non è quello del `.venv`,
+`avvia.py` si rilancia con `.venv\Scripts\python.exe`, dove sono installate le dipendenze; aggiunge
+anche `src` al percorso, quindi non serve `PYTHONPATH`. Verificato il 2026-11-02 in PowerShell senza
+variabili impostate, con il Python di sistema, con quello del `.venv` e dalla cartella superiore.
+In alternativa resta `python -m assistente` con `$env:PYTHONPATH = "src"` e il Python del `.venv`.
 
 Scrivere `esci` (o `exit`, `quit`) per terminare. Senza `LMSTUDIO_MODEL` (né nel `.env` né
 nell'ambiente) il programma stampa un errore che cita la variabile e il file `.env` ed esce con
@@ -88,7 +91,7 @@ Il modello li richiede tramite tool calling; il programma li esegue davvero (reg
 ```powershell
 .venv\Scripts\python.exe -m pytest
 ```
-I test non richiedono un modello attivo (esito verificato il 2026-11-02: 147 passati, 5 deselezionati).
+I test non richiedono un modello attivo (esito verificato il 2026-11-02: 150 passati, 5 deselezionati).
 
 ## Da verificare (non ancora eseguito)
 Su Python 3.14 sono verificati: l'installazione di `requirements.txt` in un `.venv` locale, i test
@@ -161,8 +164,13 @@ Non verificato: avvio con Docker (vedi sezione precedente; il 2026-11-02 Docker 
 L'immagine va ricostruita (`docker compose build`) perché `requirements.txt` ora include `python-dotenv`.
 
 ## Diagnosi
-- **Variabile mancante nonostante il `.env`**: il file è letto dalla cartella corrente; avviare
-  da `assistente-laboratorio/`. Una riga `NOME` senza `=valore` conta come mancante.
+- **Variabile mancante nonostante il `.env`**: il file letto è `assistente-laboratorio/.env`; una
+  riga `NOME` senza `=valore` conta come mancante, e una variabile impostata (anche vuota) nella
+  sessione prevale sul file.
+- **`Errore: dipendenza mancante`** all'avvio: manca il `.venv` del progetto; crearlo come in
+  «Installazione locale».
+- **«esci» inviato con una pipe da PowerShell**: PowerShell antepone un BOM alla prima riga; il
+  programma lo ignora.
 - **Server non raggiungibile**: verificare che il server locale di LM Studio sia attivo e che
   `LMSTUDIO_BASE_URL` punti alla porta giusta.
 - **Modello non trovato**: `LMSTUDIO_MODEL` deve coincidere con un id di `GET /v1/models`.
