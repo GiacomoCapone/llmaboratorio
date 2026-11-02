@@ -1,11 +1,17 @@
-"""Lettura e validazione della configurazione dalle variabili d'ambiente."""
+"""Lettura e validazione della configurazione: file .env e variabili d'ambiente."""
 
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
+
+from dotenv import dotenv_values
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 LIVELLI_RAGIONAMENTO = ("none", "low", "medium", "high")
+
+# File .env nella cartella da cui si avvia il programma.
+PERCORSO_ENV = Path(".env")
 
 
 class ErroreConfigurazione(Exception):
@@ -26,14 +32,23 @@ def _obbligatoria(env: Mapping[str, str], nome: str) -> str:
     valore = env.get(nome, "").strip()
     if not valore:
         raise ErroreConfigurazione(
-            f"Variabile d'ambiente {nome} mancante o vuota: impostarla (vedi .env.example)."
+            f"Variabile {nome} mancante o vuota: impostarla nel file .env "
+            "(copiato da .env.example) o nell'ambiente."
         )
     return valore
 
 
+def leggi_file_env(percorso: Path) -> dict[str, str]:
+    """Variabili del file .env (vuoto se il file manca); le righe senza valore sono ignorate."""
+    if not percorso.is_file():
+        return {}
+    return {k: v for k, v in dotenv_values(percorso).items() if v is not None}
+
+
 def carica_config(env: Mapping[str, str] | None = None) -> Config:
+    """Configurazione da `env`; se assente, dal file .env e dall'ambiente, che ha la precedenza."""
     if env is None:
-        env = os.environ
+        env = {**leggi_file_env(PERCORSO_ENV), **os.environ}
     base_url = _obbligatoria(env, "LMSTUDIO_BASE_URL").rstrip("/")
     model = _obbligatoria(env, "LMSTUDIO_MODEL")
 
