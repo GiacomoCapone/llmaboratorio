@@ -74,6 +74,20 @@ altro → `Errore: argomento 'fuso' non testuale. ...`).
 - Log `tool_call` / `tool_result` invariati. Nodi, instradamento, limite di passaggi, cronologia invariati.
 - `cli.main()` costruisce il registro con `crea_strumenti(...)` e lo passa a `build_graph`.
 
+### Risposta vuota dopo gli strumenti (aggiunto il 2026-11-02)
+Prova reale: con due strumenti collegati `google/gemma-4-e2b` risponde ai risultati degli strumenti con
+un solo token (risposta vuota, `finish_reason=stop`), in 3 esecuzioni su 3; con un solo strumento no.
+Non dipende dall'ordine né da una singola frase; spariscono il problema accorciando entrambe le
+descrizioni (ma l'orologio torna a chiedere il fuso), con ragionamento `low` (20–80 s per chiamata) o
+richiamando il modello senza strumenti.
+
+Regola nel nodo `modello`: se l'ultimo messaggio dello stato è un `ToolMessage` e la risposta del modello
+non ha tool call (valide o non valide) e ha contenuto vuoto (stringa vuota o di soli spazi, o lista vuota),
+la risposta è scartata e il modello è richiamato una sola volta **senza strumenti** sugli stessi messaggi;
+si conserva il risultato di questa seconda chiamata, anche se vuoto. Log `WARNING`
+`risposta vuota dopo gli strumenti: nuova chiamata senza strumenti`. `passaggi` non cambia.
+Una risposta vuota a una domanda senza strumenti non è ripetuta.
+
 ## Calcolatrice
 ### Definizione per il modello
 - `name`: `calcola`; parametro `espressione` (stringa), `required: ["espressione"]`.

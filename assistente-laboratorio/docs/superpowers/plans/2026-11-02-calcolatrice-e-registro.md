@@ -168,6 +168,25 @@ un tokenizzatore più un parser a discesa ricorsiva.
 
 - [ ] **Step 5: Commit** `feat(strumenti): registra la calcolatrice` (`git add src/assistente/strumenti/__init__.py tests/test_strumenti.py tests/test_grafo.py`).
 
+### Task 3b: Risposta vuota dopo gli strumenti (aggiunto dopo le prove reali)
+
+**Files:** Modify `src/assistente/grafo.py` (nodo `modello`), `tests/finti.py`, `tests/test_grafo.py`
+
+**Interfaces:**
+- `tests/finti.py`: `LlmFinto.bind_tools` restituisce una vista legata; `LlmFinto.con_strumenti: list[bool]`
+  registra per ogni invocazione se è avvenuta con gli strumenti.
+
+- [ ] **Step 1: Write the failing tests**
+  - `test_risposta_vuota_dopo_strumenti_ripete_senza_strumenti`: `[richiesta("calcola", {"espressione": "2+2"}), AIMessage(""), AIMessage("Fa 4.")]`
+    → ultima risposta `"Fa 4."`, `llm.con_strumenti == [True, True, False]`, nessuna AIMessage vuota senza tool call nello stato,
+    `stato["passaggi"] == 1`, log WARNING con `"risposta vuota dopo gli strumenti"`.
+  - `test_risposta_vuota_ripetuta_una_sola_volta`: `[richiesta(...), AIMessage(""), AIMessage("")]` → `con_strumenti == [True, True, False]`, ultima risposta vuota.
+  - `test_risposta_vuota_senza_strumenti_non_ripete`: `[AIMessage("")]` → `con_strumenti == [True]`.
+- [ ] **Step 2: Run** `python -m pytest tests/test_grafo.py -q`. Expected: FAIL.
+- [ ] **Step 3: Implement** la regola della specifica nel nodo `modello` (`llm.invoke` per la chiamata senza strumenti).
+- [ ] **Step 4: Run** `python -m pytest -q`. Expected: PASS.
+- [ ] **Step 5: Commit** `fix(grafo): ripete senza strumenti una risposta vuota dopo i risultati`.
+
 ### Task 4: Prove reali e documentazione
 
 **Files:**
