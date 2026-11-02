@@ -10,8 +10,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 LIVELLI_RAGIONAMENTO = ("none", "low", "medium", "high")
 
-# File .env nella cartella da cui si avvia il programma.
-PERCORSO_ENV = Path(".env")
+# File .env nella cartella del progetto (src/assistente/config.py → ../../.env), qualunque sia
+# la cartella da cui si avvia il programma. Nell'immagine Docker non esiste: lì vale l'ambiente.
+PERCORSO_ENV_PROGETTO = Path(__file__).resolve().parents[2] / ".env"
+PERCORSO_ENV = PERCORSO_ENV_PROGETTO
 
 
 class ErroreConfigurazione(Exception):

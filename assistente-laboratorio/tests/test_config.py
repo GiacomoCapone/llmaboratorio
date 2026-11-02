@@ -128,3 +128,12 @@ def test_env_esplicito_ignora_il_file(tmp_path, monkeypatch):
         "assistente.config.PERCORSO_ENV", scrivi_env(tmp_path, "MAX_PASSAGGI=9\n")
     )
     assert carica_config(BASE).max_passaggi == 5
+
+
+def test_il_file_env_e_quello_del_progetto():
+    # Non dipende dalla cartella corrente: avvia.py funziona da qualunque cartella.
+    import assistente.config as modulo
+    from pathlib import Path
+
+    radice = Path(__file__).resolve().parents[1]
+    assert modulo.PERCORSO_ENV_PROGETTO == radice / ".env"
