@@ -74,3 +74,18 @@ def test_il_modello_usa_la_calcolatrice(caplog, domanda, risultato, forme):
     assert risultato in validi, f"nessun ToolMessage uguale a {risultato!r}: {validi}"
     finale = str(stato["messaggi"][-1].content)
     assert any(f in finale for f in forme), f"risposta senza il risultato: {finale!r}"
+
+
+@pytest.mark.parametrize(
+    "domanda, risultato, forme",
+    [
+        ("Quanti metri sono 2,5 km?", "2500 m", ("2500", "2.500")),
+        ("Quanti gradi Celsius sono 300 K?", "26.85 °C", ("26,85", "26.85")),
+    ],
+)
+def test_il_modello_usa_il_convertitore(caplog, domanda, risultato, forme):
+    stato, validi = esegui_domanda(domanda, caplog)
+    assert "tool_call nome=converti_unita" in caplog.text
+    assert risultato in validi, f"nessun ToolMessage uguale a {risultato!r}: {validi}"
+    finale = str(stato["messaggi"][-1].content)
+    assert any(f in finale for f in forme), f"risposta senza il risultato: {finale!r}"
