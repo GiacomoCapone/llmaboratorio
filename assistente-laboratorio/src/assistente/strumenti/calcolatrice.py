@@ -32,7 +32,8 @@ DEFINIZIONE_CALCOLA = {
                     "type": "string",
                     "description": (
                         "Espressione da calcolare, per esempio (3 + 7) / 4. Numeri con il "
-                        "punto o la virgola decimale; niente unità di misura, simboli di "
+                        "punto o la virgola decimale, senza separatore delle migliaia "
+                        "(scrivi 1000, non 1.000); niente unità di misura, simboli di "
                         "percentuale o funzioni."
                     ),
                 }

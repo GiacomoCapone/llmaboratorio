@@ -127,3 +127,9 @@ def test_definizione():
     assert funzione["parameters"]["required"] == ["espressione"]
     assert "SEMPRE" in funzione["description"]
     assert "50 * 20 / 100" in funzione["description"]
+
+
+def test_descrizione_vieta_il_separatore_delle_migliaia():
+    # "1.000" sarebbe letto come 1,000: il modello deve scrivere 1000.
+    parametro = DEFINIZIONE_CALCOLA["function"]["parameters"]["properties"]["espressione"]
+    assert "senza separatore delle migliaia (scrivi 1000, non 1.000)" in parametro["description"]

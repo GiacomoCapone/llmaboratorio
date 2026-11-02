@@ -96,7 +96,9 @@ Una risposta vuota a una domanda senza strumenti non è ripetuta.
   mente, per esempio 'quanto fa 12,5 * 4' o '(3 + 7) / 4'. Per le percentuali scrivi la moltiplicazione,
   per esempio 50 * 20 / 100."
 - `espressione.description`: "Espressione da calcolare, per esempio (3 + 7) / 4. Numeri con il punto o
-  la virgola decimale; niente unità di misura, simboli di percentuale o funzioni."
+  la virgola decimale, senza separatore delle migliaia (scrivi 1000, non 1.000); niente unità di misura,
+  simboli di percentuale o funzioni." (Separatore delle migliaia aggiunto dopo la revisione finale:
+  `1.000 * 2` è letto come `1.000` decimale e dà `2`; non si può respingere senza respingere `0.125`.)
 
 ### Grammatica
 ```
