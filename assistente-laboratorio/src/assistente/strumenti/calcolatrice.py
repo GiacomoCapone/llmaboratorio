@@ -43,7 +43,9 @@ DEFINIZIONE_CALCOLA = {
 }
 
 # Solo cifre ASCII: \d accetterebbe anche cifre Unicode.
-_TOKEN = re.compile(r"(?P<numero>[0-9]+(?:[.,][0-9]+)?)|(?P<operatore>[-+*/()])|(?P<spazio>[ \t]+)")
+_TOKEN = re.compile(
+    r"(?P<numero>[0-9]+(?:[.,][0-9]+)?)|(?P<operatore>[-+*/()])|(?P<spazio>[ \t]+)"
+)
 
 
 class _ErroreCalcolo(Exception):

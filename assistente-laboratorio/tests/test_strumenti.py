@@ -5,8 +5,8 @@ from assistente.strumenti import crea_strumenti
 ADESSO = lambda: datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)  # noqa: E731
 
 
-def test_registro_contiene_orologio():
-    assert list(crea_strumenti(ADESSO, "Europe/Rome")) == ["ora_corrente"]
+def test_registro_contiene_gli_strumenti():
+    assert list(crea_strumenti(ADESSO, "Europe/Rome")) == ["ora_corrente", "calcola"]
 
 
 def test_nome_coincide_con_definizione():

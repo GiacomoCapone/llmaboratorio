@@ -224,3 +224,27 @@ def test_log_delle_chiamate_allo_strumento(caplog):
     testi = [r.getMessage() for r in caplog.records if r.name == "assistente.grafo"]
     assert any("tool_call nome=ora_corrente" in t and "Europe/Rome" in t for t in testi)
     assert any("tool_result nome=ora_corrente" in t for t in testi)
+
+
+def test_tool_call_calcola():
+    llm = LlmFinto(
+        [richiesta("calcola", {"espressione": "2 + 3 * 4"}), AIMessage("Fa 14.")]
+    )
+    stato = esegui(llm, testo="Quanto fa 2 + 3 * 4?")
+    assert tool_messages(stato)[0].content == "14"
+    assert stato["messaggi"][-1].content == "Fa 14."
+
+
+def test_due_strumenti_nella_stessa_risposta():
+    doppia = AIMessage(
+        content="",
+        tool_calls=[
+            {"name": "ora_corrente", "args": {}, "id": "c1"},
+            {"name": "calcola", "args": {"espressione": "1 / 4"}, "id": "c2"},
+        ],
+    )
+    llm = LlmFinto([doppia, AIMessage("Ecco.")])
+    stato = esegui(llm)
+    tool = tool_messages(stato)
+    assert [m.tool_call_id for m in tool] == ["c1", "c2"]
+    assert [m.content for m in tool] == ["2026-01-15T13:00:00+01:00", "0.25"]

@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
+from assistente.strumenti.calcolatrice import DEFINIZIONE_CALCOLA, esegui_calcola
 from assistente.strumenti.orologio import definizione_ora_corrente, esegui_ora_corrente
 
 
@@ -26,5 +27,6 @@ def crea_strumenti(
             definizione_ora_corrente(fuso_predefinito),
             lambda args: esegui_ora_corrente(args, adesso, fuso_predefinito),
         ),
+        Strumento(DEFINIZIONE_CALCOLA, esegui_calcola),
     ]
     return {s.nome: s for s in strumenti}
