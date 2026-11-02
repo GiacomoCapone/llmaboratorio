@@ -55,4 +55,5 @@ def crea_llm(config: Config) -> ChatOpenAI:
         model=config.model,
         api_key="lm-studio",
         temperature=0,
+        reasoning_effort=config.reasoning_effort,
     )

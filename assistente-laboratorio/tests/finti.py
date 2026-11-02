@@ -10,9 +10,11 @@ class LlmFinto:
         self.risposte = list(risposte)
         self.ripeti_ultima = ripeti_ultima
         self.chiamate: list[list] = []
+        self.strumenti: list = []
         self._indice = 0
 
     def bind_tools(self, tools) -> "LlmFinto":
+        self.strumenti = list(tools)
         return self
 
     def invoke(self, messaggi) -> AIMessage:

@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import httpx
 import pytest
 
@@ -55,3 +57,8 @@ def test_crea_llm_usa_configurazione():
     llm = crea_llm(_config("a"))
     assert llm.model_name == "a"
     assert str(llm.openai_api_base).rstrip("/") == URL
+
+
+def test_crea_llm_imposta_reasoning_effort():
+    llm = crea_llm(replace(_config("a"), reasoning_effort="low"))
+    assert llm.reasoning_effort == "low"

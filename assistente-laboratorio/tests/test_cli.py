@@ -39,7 +39,7 @@ def leggi_da(righe):
 
 def test_la_seconda_domanda_vede_la_prima():
     llm = LlmFinto([AIMessage("Risposta uno"), AIMessage("Risposta due")])
-    grafo = build_graph(llm, ADESSO, 5)
+    grafo = build_graph(llm, ADESSO, 5, "Europe/Rome")
     esito1 = esegui_turno(grafo, [], "Prima domanda")
     esito2 = esegui_turno(grafo, esito1.cronologia, "Seconda domanda")
     visto = unisci_testo(llm.chiamate[1])
@@ -51,14 +51,14 @@ def test_la_seconda_domanda_vede_la_prima():
 
 def test_turno_interrotto_non_entra_in_cronologia():
     llm = LlmFinto([richiesta_ora("Europe/Rome")], ripeti_ultima=True)
-    grafo = build_graph(llm, ADESSO, 1)
+    grafo = build_graph(llm, ADESSO, 1, "Europe/Rome")
     esito = esegui_turno(grafo, [], "Che ore sono?")
     assert esito.interrotto is True
     assert esito.testo == MESSAGGIO_LIMITE
     assert esito.cronologia == []
 
     llm2 = LlmFinto([AIMessage("Ok")])
-    grafo2 = build_graph(llm2, ADESSO, 1)
+    grafo2 = build_graph(llm2, ADESSO, 1, "Europe/Rome")
     esito2 = esegui_turno(grafo2, esito.cronologia, "Ciao")
     assert esito2.testo == "Ok"
     assert tool_calls_orfani(llm2.chiamate[0]) == []
@@ -75,7 +75,7 @@ class LlmErroreIniziale(LlmFinto):
 
 def test_errore_del_modello_non_chiude_la_sessione():
     llm = LlmErroreIniziale([AIMessage("Risposta valida")])
-    grafo = build_graph(llm, ADESSO, 5)
+    grafo = build_graph(llm, ADESSO, 5, "Europe/Rome")
     uscite = []
     ciclo(grafo, leggi_da(["Prima", "Seconda", "esci"]), uscite.append)
     assert any(u.startswith("Errore:") for u in uscite)
@@ -85,7 +85,7 @@ def test_errore_del_modello_non_chiude_la_sessione():
 
 def test_ciclo_segnala_turno_interrotto():
     llm = LlmFinto([richiesta_ora("Europe/Rome")], ripeti_ultima=True)
-    grafo = build_graph(llm, ADESSO, 1)
+    grafo = build_graph(llm, ADESSO, 1, "Europe/Rome")
     uscite = []
     ciclo(grafo, leggi_da(["Ora?", "quit"]), uscite.append)
     assert any(MESSAGGIO_LIMITE in u for u in uscite)
@@ -93,7 +93,7 @@ def test_ciclo_segnala_turno_interrotto():
 
 def test_risposta_vuota_non_manda_in_crash():
     llm = LlmFinto([AIMessage("")])
-    grafo = build_graph(llm, ADESSO, 5)
+    grafo = build_graph(llm, ADESSO, 5, "Europe/Rome")
     uscite = []
     ciclo(grafo, leggi_da(["Ciao", "exit"]), uscite.append)
     assert uscite and all(u.strip() for u in uscite)
@@ -102,7 +102,7 @@ def test_risposta_vuota_non_manda_in_crash():
 def test_input_vuoto_e_uscita():
     for finale in ["ESCI", EOFError(), KeyboardInterrupt()]:
         llm = LlmFinto([])
-        grafo = build_graph(llm, ADESSO, 5)
+        grafo = build_graph(llm, ADESSO, 5, "Europe/Rome")
         uscite = []
         ciclo(grafo, leggi_da(["", "   ", finale]), uscite.append)
         assert llm.chiamate == []
@@ -118,7 +118,7 @@ class LlmCtrlCIniziale(LlmFinto):
 
 def test_ctrl_c_durante_il_turno_annulla_solo_il_turno():
     llm = LlmCtrlCIniziale([AIMessage("Risposta valida")])
-    grafo = build_graph(llm, ADESSO, 5)
+    grafo = build_graph(llm, ADESSO, 5, "Europe/Rome")
     uscite = []
     ciclo(grafo, leggi_da(["Prima", "Seconda", "esci"]), uscite.append)
     assert any("annullato" in u for u in uscite)

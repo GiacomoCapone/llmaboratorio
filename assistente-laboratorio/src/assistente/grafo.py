@@ -8,7 +8,7 @@ from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
-from assistente.strumenti import DEFINIZIONE_ORA_CORRENTE, NOME_ORA_CORRENTE, ora_corrente
+from assistente.strumenti import NOME_ORA_CORRENTE, definizione_ora_corrente, ora_corrente
 
 logger = logging.getLogger("assistente.grafo")
 
@@ -38,24 +38,33 @@ def instrada_dopo_modello(
     return "limite"
 
 
-def _esegui_strumento(nome, args, adesso: Callable[[], datetime]) -> str:
-    """Esegue uno strumento per nome; errori di nome o argomenti diventano 'Errore: ...'."""
+def _esegui_strumento(
+    nome, args, adesso: Callable[[], datetime], fuso_predefinito: str
+) -> str:
+    """Esegue uno strumento per nome; errori di nome o argomenti diventano 'Errore: ...'.
+
+    Un fuso assente, nullo o vuoto è sostituito dal fuso predefinito.
+    """
     if nome != NOME_ORA_CORRENTE:
         return f"Errore: strumento sconosciuto: '{nome}'."
     if not isinstance(args, dict):
         return "Errore: argomenti non validi, atteso un oggetto con il campo 'fuso'."
     fuso = args.get("fuso")
+    if fuso is None or (isinstance(fuso, str) and not fuso.strip()):
+        return ora_corrente(fuso_predefinito, adesso)
     if not isinstance(fuso, str):
         return (
-            "Errore: argomento 'fuso' mancante o non testuale. "
+            "Errore: argomento 'fuso' non testuale. "
             "Usare un nome IANA come Europe/Rome."
         )
     return ora_corrente(fuso, adesso)
 
 
-def build_graph(llm, adesso: Callable[[], datetime], max_passaggi: int):
+def build_graph(
+    llm, adesso: Callable[[], datetime], max_passaggi: int, fuso_predefinito: str
+):
     """Costruisce e compila il grafo modello / strumenti / limite."""
-    llm_con_strumenti = llm.bind_tools([DEFINIZIONE_ORA_CORRENTE])
+    llm_con_strumenti = llm.bind_tools([definizione_ora_corrente(fuso_predefinito)])
 
     def modello(stato: Stato) -> dict:
         return {"messaggi": [llm_con_strumenti.invoke(stato["messaggi"])]}
@@ -66,7 +75,7 @@ def build_graph(llm, adesso: Callable[[], datetime], max_passaggi: int):
         for chiamata in ultimo.tool_calls:
             nome, args = chiamata.get("name"), chiamata.get("args")
             logger.info("tool_call nome=%s args=%s", nome, args)
-            testo = _esegui_strumento(nome, args, adesso)
+            testo = _esegui_strumento(nome, args, adesso, fuso_predefinito)
             logger.info("tool_result nome=%s risultato=%s", nome, testo)
             risultati.append(
                 ToolMessage(content=testo, tool_call_id=chiamata["id"], name=nome)

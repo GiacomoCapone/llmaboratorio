@@ -3,8 +3,8 @@ from datetime import datetime, timezone
 import pytest
 
 from assistente.strumenti import (
-    DEFINIZIONE_ORA_CORRENTE,
     NOME_ORA_CORRENTE,
+    definizione_ora_corrente,
     ora_corrente,
 )
 
@@ -33,8 +33,12 @@ def test_fuso_non_valido(fuso):
     assert fuso in risultato
 
 
-def test_definizione_dichiara_fuso_obbligatorio():
-    funzione = DEFINIZIONE_ORA_CORRENTE["function"]
-    assert DEFINIZIONE_ORA_CORRENTE["type"] == "function"
+def test_definizione_fuso_facoltativo():
+    definizione = definizione_ora_corrente("Asia/Tokyo")
+    funzione = definizione["function"]
+    assert definizione["type"] == "function"
     assert funzione["name"] == NOME_ORA_CORRENTE == "ora_corrente"
-    assert funzione["parameters"]["required"] == ["fuso"]
+    assert funzione["parameters"]["required"] == []
+    assert "Asia/Tokyo" in funzione["parameters"]["properties"]["fuso"]["description"]
+    assert "SEMPRE" in funzione["description"]
+    assert "Non chiedere mai il fuso" in funzione["description"]

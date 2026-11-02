@@ -10,8 +10,8 @@ from finti import LlmFinto, richiesta_malformata, richiesta_ora
 ADESSO = lambda: datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)  # noqa: E731
 
 
-def esegui(llm, max_passaggi=5, testo="Che ore sono?"):
-    grafo = build_graph(llm, ADESSO, max_passaggi)
+def esegui(llm, max_passaggi=5, testo="Che ore sono?", fuso_predefinito="Europe/Rome"):
+    grafo = build_graph(llm, ADESSO, max_passaggi, fuso_predefinito)
     return grafo.invoke(
         {"messaggi": [HumanMessage(testo)], "passaggi": 0, "interrotto": False}
     )
@@ -84,19 +84,54 @@ def test_strumento_sconosciuto():
     assert stato["messaggi"][-1].content == "Non posso."
 
 
-def test_argomento_fuso_mancante():
-    senza_fuso = AIMessage(
-        content="",
-        tool_calls=[{"name": "ora_corrente", "args": {}, "id": "c1"}],
+def richiesta_con_args(args, id="c1"):
+    return AIMessage(
+        content="", tool_calls=[{"name": "ora_corrente", "args": args, "id": id}]
     )
-    llm = LlmFinto([senza_fuso, AIMessage("Mi serve il fuso.")])
+
+
+@pytest.mark.parametrize("args", [{}, {"fuso": None}, {"fuso": ""}, {"fuso": "  "}])
+def test_fuso_assente_usa_predefinito(args):
+    llm = LlmFinto([richiesta_con_args(args), AIMessage("Sono le 13:00.")])
     stato = esegui(llm)
-    tool = tool_messages(stato)
-    assert tool[0].content.startswith("Errore:")
-    assert stato["messaggi"][-1].content == "Mi serve il fuso."
+    assert tool_messages(stato)[0].content == "2026-01-15T13:00:00+01:00"
+    assert stato["messaggi"][-1].content == "Sono le 13:00."
 
 
-@pytest.mark.parametrize("fuso", [None, 5, ["Europe/Rome"], {"a": 1}])
+def test_predefinito_diverso_da_roma():
+    llm = LlmFinto([richiesta_con_args({}), AIMessage("Ok.")])
+    stato = esegui(llm, fuso_predefinito="Asia/Tokyo")
+    assert tool_messages(stato)[0].content == "2026-01-15T21:00:00+09:00"
+
+
+def test_fuso_esplicito_ha_precedenza():
+    llm = LlmFinto([richiesta_con_args({"fuso": "UTC"}), AIMessage("Ok.")])
+    stato = esegui(llm, fuso_predefinito="Asia/Tokyo")
+    assert tool_messages(stato)[0].content == "2026-01-15T12:00:00+00:00"
+
+
+def test_fuso_esplicito_non_valido_non_ripiega():
+    llm = LlmFinto([richiesta_con_args({"fuso": "Europe/Roma"}), AIMessage("Ok.")])
+    stato = esegui(llm)
+    assert tool_messages(stato)[0].content.startswith("Errore:")
+
+
+def test_definizione_passata_al_modello():
+    llm = LlmFinto([AIMessage("Ciao!")])
+    esegui(llm, fuso_predefinito="Asia/Tokyo")
+    (definizione,) = llm.strumenti
+    fuso = definizione["function"]["parameters"]["properties"]["fuso"]
+    assert "Asia/Tokyo" in fuso["description"]
+
+
+def test_log_mostra_argomenti_ricevuti(caplog):
+    llm = LlmFinto([richiesta_con_args({}), AIMessage("Ok.")])
+    with caplog.at_level(logging.INFO, logger="assistente.grafo"):
+        esegui(llm)
+    assert "tool_call nome=ora_corrente args={}" in caplog.text
+
+
+@pytest.mark.parametrize("fuso", [5, ["Europe/Rome"], {"a": 1}])
 def test_argomento_fuso_non_stringa(fuso):
     llm = LlmFinto([richiesta_ora(fuso), AIMessage("Riprovo.")])
     stato = esegui(llm)

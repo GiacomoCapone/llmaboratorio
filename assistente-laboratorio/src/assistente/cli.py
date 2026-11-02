@@ -78,7 +78,10 @@ def main() -> int:
         )
         verifica_modello(config)
         grafo = build_graph(
-            crea_llm(config), lambda: datetime.now(timezone.utc), config.max_passaggi
+            crea_llm(config),
+            lambda: datetime.now(timezone.utc),
+            config.max_passaggi,
+            config.fuso_predefinito,
         )
         print("Assistente del laboratorio. Scrivere 'esci' per terminare.")
         ciclo(grafo, lambda: input("> "), print)
