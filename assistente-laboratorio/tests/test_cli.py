@@ -144,3 +144,13 @@ def test_main_configurazione_mancante(monkeypatch, capsys):
     monkeypatch.setenv("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
     assert main() == 1
     assert capsys.readouterr().err.strip() != ""
+
+
+def test_bom_di_powershell_ignorato():
+    # PowerShell antepone \ufeff alla prima riga inviata con una pipe.
+    llm = LlmFinto([AIMessage("Ciao!")])
+    grafo = build_graph(llm, crea_strumenti(ADESSO, "Europe/Rome"), 5)
+    uscite = []
+    ciclo(grafo, leggi_da(["\ufeffciao", "\ufeffesci", "non letta"]), uscite.append)
+    assert uscite == ["Ciao!"]
+    assert unisci_testo(llm.chiamate[0]).strip() == "ciao"

@@ -47,7 +47,8 @@ def ciclo(grafo, leggi: Callable[[], str], scrivi: Callable[[str], None]) -> Non
     cronologia: list[BaseMessage] = []
     while True:
         try:
-            riga = leggi().strip()
+            # PowerShell antepone un BOM (\ufeff) alla prima riga inviata con una pipe.
+            riga = leggi().replace("\ufeff", "").strip()
         except (EOFError, KeyboardInterrupt):
             break
         if not riga:
