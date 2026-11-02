@@ -9,9 +9,10 @@ La cartella del progetto è `assistente-laboratorio/`.
 - `strumenti/` è un pacchetto: un modulo per strumento e il registro (`crea_strumenti`) in
   `__init__.py`; il grafo esegue gli strumenti per nome senza conoscerli.
 - Test automatici (senza modello): `python -m pytest`.
-- Prova reale con LM Studio attivo e `LMSTUDIO_BASE_URL`/`LMSTUDIO_MODEL` impostate:
+- Prova reale con LM Studio attivo e `LMSTUDIO_BASE_URL`/`LMSTUDIO_MODEL` nel `.env` (o nell'ambiente):
   `python -m pytest -m reale -v` (esclusa di default).
-- Avvio: `python -m assistente`; con Docker: `docker compose run --rm assistente`.
+- Avvio: `.venv\Scripts\python.exe avvia.py` (legge il `.env`, senza variabili né `PYTHONPATH`);
+  con Docker: `docker compose run --rm assistente`.
 - Dettagli di configurazione e diagnosi nel `README.md`.
 
 ## Obiettivo
@@ -36,7 +37,8 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
 - Python 3.14 (venv locale e immagine Docker), codice sincrono e moduli piccoli, con una separazione semplice tra
   grafo, collegamento al modello, strumenti e interfaccia da terminale.
 - LM Studio sull'host, raggiunto tramite la sua API compatibile con OpenAI.
-- Indirizzo del server e identificativo del modello solo da variabili d'ambiente.
+- Indirizzo del server e identificativo del modello solo da variabili d'ambiente o dal file `.env`
+  (letto con `python-dotenv`; una variabile già nell'ambiente prevale sul file).
   L'identificativo è quello restituito dal server (`GET /v1/models`), mai inventato.
 - Un file di configurazione di esempio senza credenziali; il file reale resta fuori da Git.
 - Docker Compose per l'applicazione; LM Studio non va containerizzato.
