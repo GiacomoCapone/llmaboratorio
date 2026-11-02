@@ -35,7 +35,17 @@ poi rimosso); `curl` va lanciato da bash, perché in Windows PowerShell 5.1 `cur
 `Invoke-WebRequest`.
 
 Variabili: `LMSTUDIO_BASE_URL` (default nell'esempio `http://localhost:1234/v1`), `LMSTUDIO_MODEL`
-(obbligatoria), `MAX_PASSAGGI` (default 5), `LOG_LEVEL` (default INFO).
+(obbligatoria), `MAX_PASSAGGI` (default 5), `LOG_LEVEL` (default INFO),
+`LMSTUDIO_REASONING_EFFORT` (default `none`; ammessi `none`, `low`, `medium`, `high`) e
+`FUSO_PREDEFINITO` (default `Europe/Rome`, nome IANA). Un valore non ammesso per una delle ultime
+due ferma l'avvio con un errore che cita la variabile (uscita 1).
+
+`FUSO_PREDEFINITO` è il fuso usato dall'orologio quando la domanda non indica un luogo
+(«che ore sono»); il modello lo legge nella definizione dello strumento.
+
+`LMSTUDIO_REASONING_EFFORT` regola il ragionamento nascosto del modello: con `none` ogni chiamata
+dura pochi secondi; `low` (o superiore) può rendere più affidabile la scelta dello strumento con
+domande insolite, ma con `google/gemma-4-e2b` su questo computer porta ogni chiamata a 20–80 s.
 
 ## Installazione locale
 ```powershell
@@ -61,7 +71,7 @@ errore che cita la variabile ed esce con codice 1.
 ```powershell
 .venv\Scripts\python.exe -m pytest
 ```
-I test non richiedono un modello attivo (esito verificato: 60 passati, 1 deselezionato).
+I test non richiedono un modello attivo (esito verificato il 2026-11-02: 79 passati, 3 deselezionati).
 
 ## Da verificare (non ancora eseguito)
 Su Python 3.14 sono verificati: l'installazione di `requirements.txt` in un `.venv` locale, i test
@@ -110,7 +120,17 @@ Risposte: «Attualmente a Tokyo sono le ore **01:16** del 27 ottobre 2026.» e, 
 domanda, «La città di cui mi hai appena chiesto l'ora era **Tokyo**.» (cronologia di sessione
 funzionante). Una sola esecuzione per prova: non è una misura di affidabilità del modello.
 
-Non verificato: avvio con Docker (vedi sezione precedente).
+Il 2026-11-02, con fuso facoltativo e `LMSTUDIO_REASONING_EFFORT=none` (default), stesso modello:
+
+```powershell
+.venv\Scripts\python.exe -m pytest -m reale -v -s
+```
+Esito: `3 passed, 79 deselected in 32.77s` con le domande «che ore sono», «Che giorno è oggi?» e
+«Che ore sono a Tokyo?»; ogni turno (due chiamate al modello) ha richiesto circa 7–15 s. Prova
+manuale con `python -m assistente` e «che ore sono»: `tool_call nome=ora_corrente args={}`,
+risultato con l'offset di Roma (`+01:00`), risposta «Ora sono le 16:38:46.», 15 s compreso l'avvio.
+
+Non verificato: avvio con Docker (vedi sezione precedente; il 2026-11-02 Docker Desktop non era attivo).
 
 ## Diagnosi
 - **Server non raggiungibile**: verificare che il server locale di LM Studio sia attivo e che
@@ -125,6 +145,16 @@ Non verificato: avvio con Docker (vedi sezione precedente).
 - **Argomenti della tool call non in JSON valido**: il programma risponde al modello con un
   errore (riga `WARNING ... tool_call non valida` nel log) e il modello può riprovare, entro
   `MAX_PASSAGGI`.
+- **Risposte lente (decine di secondi)**: controllare che il ragionamento sia disattivato. Con
+  `lms ps` si vede il modello caricato; nell'ultimo log del server LM Studio il campo
+  `reasoning_tokens` deve valere 0 con `LMSTUDIO_REASONING_EFFORT=none`:
+  ```powershell
+  lms ps
+  $log = Get-ChildItem "$env:USERPROFILE\.lmstudio\server-logs" -Recurse -File | Sort-Object LastWriteTime | Select-Object -Last 1
+  Select-String -Path $log.FullName -Pattern '"reasoning_tokens"' | Select-Object -Last 2
+  ```
+- **«che ore sono» senza strumento**: un modello da 2B senza ragionamento resta sensibile alla
+  formulazione; provare `LMSTUDIO_REASONING_EFFORT=low`, accettando tempi molto più lunghi.
 - **Ctrl-C**: durante una risposta annulla solo il turno (`(turno annullato)`, cronologia
   invariata); all'avvio termina il programma con codice 130. Questi due comportamenti sono
   coperti dai test automatici, non provati a mano con LM Studio.
