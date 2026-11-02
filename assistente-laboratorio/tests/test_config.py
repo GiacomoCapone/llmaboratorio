@@ -10,6 +10,8 @@ def test_valori_predefiniti():
     assert isinstance(cfg, Config)
     assert cfg.max_passaggi == 5
     assert cfg.log_level == "INFO"
+    assert cfg.reasoning_effort == "none"
+    assert cfg.fuso_predefinito == "Europe/Rome"
 
 
 def test_valori_espliciti():
@@ -39,3 +41,31 @@ def test_variabile_mancante(nome, valore):
 def test_max_passaggi_non_valido(valore):
     with pytest.raises(ErroreConfigurazione, match="MAX_PASSAGGI"):
         carica_config({**BASE, "MAX_PASSAGGI": valore})
+
+
+@pytest.mark.parametrize(
+    "valore, atteso", [("low", "low"), (" Low ", "low"), ("HIGH", "high"), ("", "none")]
+)
+def test_reasoning_effort_valido(valore, atteso):
+    cfg = carica_config({**BASE, "LMSTUDIO_REASONING_EFFORT": valore})
+    assert cfg.reasoning_effort == atteso
+
+
+@pytest.mark.parametrize("valore", ["massimo", "0"])
+def test_reasoning_effort_non_valido(valore):
+    with pytest.raises(ErroreConfigurazione, match="LMSTUDIO_REASONING_EFFORT"):
+        carica_config({**BASE, "LMSTUDIO_REASONING_EFFORT": valore})
+
+
+@pytest.mark.parametrize(
+    "valore, atteso", [(" Asia/Tokyo ", "Asia/Tokyo"), ("", "Europe/Rome")]
+)
+def test_fuso_predefinito_valido(valore, atteso):
+    cfg = carica_config({**BASE, "FUSO_PREDEFINITO": valore})
+    assert cfg.fuso_predefinito == atteso
+
+
+@pytest.mark.parametrize("valore", ["Europe/Roma", "Mars/Base", "../etc/passwd"])
+def test_fuso_predefinito_non_valido(valore):
+    with pytest.raises(ErroreConfigurazione, match="FUSO_PREDEFINITO"):
+        carica_config({**BASE, "FUSO_PREDEFINITO": valore})

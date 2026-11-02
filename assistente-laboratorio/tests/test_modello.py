@@ -12,7 +12,7 @@ def _client(handler):
 
 
 def _config(model="a"):
-    return Config(URL, model, 5, "INFO")
+    return Config(URL, model, 5, "INFO", "none", "Europe/Rome")
 
 
 def test_elenca_modelli():

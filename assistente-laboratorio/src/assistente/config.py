@@ -3,6 +3,9 @@
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+LIVELLI_RAGIONAMENTO = ("none", "low", "medium", "high")
 
 
 class ErroreConfigurazione(Exception):
@@ -15,6 +18,8 @@ class Config:
     model: str
     max_passaggi: int
     log_level: str
+    reasoning_effort: str
+    fuso_predefinito: str
 
 
 def _obbligatoria(env: Mapping[str, str], nome: str) -> str:
@@ -43,4 +48,23 @@ def carica_config(env: Mapping[str, str] | None = None) -> Config:
         )
 
     log_level = env.get("LOG_LEVEL", "INFO").strip().upper() or "INFO"
-    return Config(base_url, model, max_passaggi, log_level)
+
+    reasoning_effort = env.get("LMSTUDIO_REASONING_EFFORT", "").strip().lower() or "none"
+    if reasoning_effort not in LIVELLI_RAGIONAMENTO:
+        raise ErroreConfigurazione(
+            f"LMSTUDIO_REASONING_EFFORT non valido: {reasoning_effort!r}. "
+            f"Valori ammessi: {', '.join(LIVELLI_RAGIONAMENTO)}."
+        )
+
+    fuso_predefinito = env.get("FUSO_PREDEFINITO", "").strip() or "Europe/Rome"
+    try:
+        ZoneInfo(fuso_predefinito)
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        raise ErroreConfigurazione(
+            f"FUSO_PREDEFINITO non valido: {fuso_predefinito!r}. "
+            "Usare un nome IANA come Europe/Rome."
+        ) from None
+
+    return Config(
+        base_url, model, max_passaggi, log_level, reasoning_effort, fuso_predefinito
+    )

@@ -1,6 +1,6 @@
 # Orologio senza luogo e ragionamento disattivato: specifica
 
-Data: 2026-10-28. Stato: da approvare.
+Data: 2026-10-28. Stato: approvata (2026-11-02).
 
 ## Problema
 L'assistente è lento e non usa lo strumento orologio quando l'utente non indica un luogo.
@@ -75,7 +75,8 @@ che restituisce:
 - `build_graph(llm, adesso, max_passaggi, fuso_predefinito)` collega al modello
   `definizione_ora_corrente(fuso_predefinito)`.
 - Esecuzione dello strumento:
-  - `fuso` assente → `ora_corrente(fuso_predefinito, adesso)`;
+  - `fuso` assente, `null`, stringa vuota o di soli spazi → `ora_corrente(fuso_predefinito, adesso)`
+    (aggiunto il 2026-11-02: i modelli piccoli inviano spesso `null` o `""` per i parametri facoltativi);
   - `fuso` stringa → `ora_corrente(fuso, adesso)` (un nome non valido produce `Errore: ...`, come oggi);
   - `fuso` presente ma non stringa, o argomenti non oggetto → `Errore: ...`, come oggi.
 - Il log `tool_call` resta con gli argomenti ricevuti dal modello, così un `{}` è visibile.
