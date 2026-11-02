@@ -67,11 +67,23 @@ $env:LMSTUDIO_MODEL = "<id restituito da /v1/models>"
 Scrivere `esci` (o `exit`, `quit`) per terminare. Senza `LMSTUDIO_MODEL` il programma stampa un
 errore che cita la variabile ed esce con codice 1.
 
+## Strumenti
+Il modello li richiede tramite tool calling; il programma li esegue davvero (registro in
+`src/assistente/strumenti/`).
+
+- **Orologio** (`ora_corrente`): data e ora attuali nel fuso IANA richiesto; senza luogo usa
+  `FUSO_PREDEFINITO`.
+- **Calcolatrice** (`calcola`): le quattro operazioni `+ - * /`, parentesi e segno, con decimali
+  esatti (`0.1 + 0.2` dà `0.3`) e il punto o la virgola come separatore. Non usa `eval`: l'espressione
+  è solo analizzata da un piccolo parser. Massimo 200 caratteri, 28 cifre significative. Tutto il resto
+  è respinto con un messaggio che il modello può usare per correggersi, per esempio
+  `Errore: carattere non ammesso 'x' in posizione 3. Sono ammessi numeri, + - * / e parentesi.`
+
 ## Test
 ```powershell
 .venv\Scripts\python.exe -m pytest
 ```
-I test non richiedono un modello attivo (esito verificato il 2026-11-02: 79 passati, 3 deselezionati).
+I test non richiedono un modello attivo (esito verificato il 2026-11-02: 140 passati, 5 deselezionati).
 
 ## Da verificare (non ancora eseguito)
 Su Python 3.14 sono verificati: l'installazione di `requirements.txt` in un `.venv` locale, i test
@@ -130,6 +142,13 @@ Esito: `3 passed, 79 deselected in 32.77s` con le domande «che ore sono», «Ch
 manuale con `python -m assistente` e «che ore sono»: `tool_call nome=ora_corrente args={}`,
 risultato con l'offset di Roma (`+01:00`), risposta «Ora sono le 16:38:46.», 15 s compreso l'avvio.
 
+Il 2026-11-02, dopo l'aggiunta della calcolatrice (due strumenti collegati al modello):
+`.venv\Scripts\python.exe -m pytest -m reale -v -s` → `5 passed`: le tre domande sull'ora e
+«Quanto fa 12,5 * 4?» (risultato dello strumento `50`), «Quanto fa (3 + 7) / 4?» (`2.5`). Tempi per
+turno fra 6 e 11 s, tranne l'ultima domanda (42,5 s). Prova manuale nella stessa sessione:
+«Quanto fa 12,5 * 4?» → «12,5 moltiplicato per 4 fa **50**.», poi «che ore sono» → ora di Roma; nel
+log è comparsa una volta la riga `risposta vuota dopo gli strumenti` (vedi Diagnosi).
+
 Non verificato: avvio con Docker (vedi sezione precedente; il 2026-11-02 Docker Desktop non era attivo).
 
 ## Diagnosi
@@ -155,6 +174,10 @@ Non verificato: avvio con Docker (vedi sezione precedente; il 2026-11-02 Docker 
   ```
 - **«che ore sono» senza strumento**: un modello da 2B senza ragionamento resta sensibile alla
   formulazione; provare `LMSTUDIO_REASONING_EFFORT=low`, accettando tempi molto più lunghi.
+- **`WARNING ... risposta vuota dopo gli strumenti`**: con più strumenti collegati,
+  `google/gemma-4-e2b` risponde spesso ai risultati con un testo vuoto. Il programma richiama allora il
+  modello una volta senza strumenti, che produce la risposta. È atteso; se anche la seconda risposta è
+  vuota, la CLI mostra `(il modello non ha prodotto una risposta)`.
 - **Ctrl-C**: durante una risposta annulla solo il turno (`(turno annullato)`, cronologia
   invariata); all'avvio termina il programma con codice 130. Questi due comportamenti sono
   coperti dai test automatici, non provati a mano con LM Studio.
