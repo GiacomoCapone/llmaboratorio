@@ -1,6 +1,6 @@
 # Convertitore di unità SI: specifica
 
-Data: 2026-11-02. Stato: da approvare.
+Data: 2026-11-02. Stato: approvata (2026-11-02).
 
 ## Contesto
 Ciclo 2 di 6 (vedi `2026-11-02-calcolatrice-e-registro-design.md`). Strumento locale, aggiunto al
