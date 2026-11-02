@@ -1,4 +1,4 @@
-"""Strumenti a disposizione del modello."""
+"""Strumento orologio: data e ora correnti in un fuso orario IANA."""
 
 from datetime import datetime, timezone
 from typing import Callable
@@ -47,3 +47,18 @@ def ora_corrente(fuso: str, adesso: Callable[[], datetime]) -> str:
     if istante.tzinfo is None:
         istante = istante.replace(tzinfo=timezone.utc)
     return istante.astimezone(zona).isoformat()
+
+
+def esegui_ora_corrente(
+    args: dict, adesso: Callable[[], datetime], fuso_predefinito: str
+) -> str:
+    """Esegue l'orologio; un fuso assente, nullo o vuoto è sostituito dal predefinito."""
+    fuso = args.get("fuso")
+    if fuso is None or (isinstance(fuso, str) and not fuso.strip()):
+        return ora_corrente(fuso_predefinito, adesso)
+    if not isinstance(fuso, str):
+        return (
+            "Errore: argomento 'fuso' non testuale. "
+            "Usare un nome IANA come Europe/Rome."
+        )
+    return ora_corrente(fuso, adesso)

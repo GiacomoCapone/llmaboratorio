@@ -15,6 +15,7 @@ from langchain_core.messages import HumanMessage, ToolMessage
 from assistente.config import carica_config
 from assistente.grafo import build_graph
 from assistente.modello import crea_llm, verifica_modello
+from assistente.strumenti import crea_strumenti
 
 pytestmark = pytest.mark.reale
 
@@ -32,9 +33,8 @@ def test_il_modello_usa_lo_strumento_orologio(caplog, domanda, offset):
     verifica_modello(config)
     grafo = build_graph(
         crea_llm(config),
-        lambda: datetime.now(timezone.utc),
+        crea_strumenti(lambda: datetime.now(timezone.utc), config.fuso_predefinito),
         config.max_passaggi,
-        config.fuso_predefinito,
     )
 
     inizio = time.perf_counter()

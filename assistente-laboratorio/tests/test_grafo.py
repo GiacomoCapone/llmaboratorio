@@ -4,14 +4,22 @@ from datetime import datetime, timezone
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from assistente.grafo import MESSAGGIO_LIMITE, build_graph, instrada_dopo_modello
-from finti import LlmFinto, richiesta_malformata, richiesta_ora
+from assistente.grafo import (
+    MESSAGGIO_LIMITE,
+    _esegui_strumento,
+    build_graph,
+    instrada_dopo_modello,
+)
+from assistente.strumenti import Strumento, crea_strumenti
+from finti import LlmFinto, richiesta, richiesta_malformata, richiesta_ora
 
 ADESSO = lambda: datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)  # noqa: E731
 
 
-def esegui(llm, max_passaggi=5, testo="Che ore sono?", fuso_predefinito="Europe/Rome"):
-    grafo = build_graph(llm, ADESSO, max_passaggi, fuso_predefinito)
+def esegui(llm, max_passaggi=5, testo="Che ore sono?", strumenti=None):
+    if strumenti is None:
+        strumenti = crea_strumenti(ADESSO, "Europe/Rome")
+    grafo = build_graph(llm, strumenti, max_passaggi)
     return grafo.invoke(
         {"messaggi": [HumanMessage(testo)], "passaggi": 0, "interrotto": False}
     )
@@ -79,79 +87,58 @@ def test_strumento_sconosciuto():
     stato = esegui(llm)
     tool = tool_messages(stato)
     assert len(tool) == 1
-    assert tool[0].content.startswith("Errore:")
+    assert tool[0].content == "Errore: strumento sconosciuto: 'meteo'."
     assert tool[0].tool_call_id == "c1"
     assert stato["messaggi"][-1].content == "Non posso."
 
 
-def richiesta_con_args(args, id="c1"):
-    return AIMessage(
-        content="", tool_calls=[{"name": "ora_corrente", "args": args, "id": id}]
-    )
-
-
-@pytest.mark.parametrize("args", [{}, {"fuso": None}, {"fuso": ""}, {"fuso": "  "}])
-def test_fuso_assente_usa_predefinito(args):
-    llm = LlmFinto([richiesta_con_args(args), AIMessage("Sono le 13:00.")])
-    stato = esegui(llm)
-    assert tool_messages(stato)[0].content == "2026-01-15T13:00:00+01:00"
-    assert stato["messaggi"][-1].content == "Sono le 13:00."
-
-
-def test_predefinito_diverso_da_roma():
-    llm = LlmFinto([richiesta_con_args({}), AIMessage("Ok.")])
-    stato = esegui(llm, fuso_predefinito="Asia/Tokyo")
-    assert tool_messages(stato)[0].content == "2026-01-15T21:00:00+09:00"
-
-
-def test_fuso_esplicito_ha_precedenza():
-    llm = LlmFinto([richiesta_con_args({"fuso": "UTC"}), AIMessage("Ok.")])
-    stato = esegui(llm, fuso_predefinito="Asia/Tokyo")
-    assert tool_messages(stato)[0].content == "2026-01-15T12:00:00+00:00"
-
-
-def test_fuso_esplicito_non_valido_non_ripiega():
-    llm = LlmFinto([richiesta_con_args({"fuso": "Europe/Roma"}), AIMessage("Ok.")])
-    stato = esegui(llm)
-    assert tool_messages(stato)[0].content.startswith("Errore:")
-
-
-def test_definizione_passata_al_modello():
+def test_definizioni_nell_ordine_del_registro():
+    registro = crea_strumenti(ADESSO, "Asia/Tokyo")
     llm = LlmFinto([AIMessage("Ciao!")])
-    esegui(llm, fuso_predefinito="Asia/Tokyo")
-    (definizione,) = llm.strumenti
-    fuso = definizione["function"]["parameters"]["properties"]["fuso"]
+    esegui(llm, strumenti=registro)
+    assert llm.strumenti == [s.definizione for s in registro.values()]
+    fuso = llm.strumenti[0]["function"]["parameters"]["properties"]["fuso"]
     assert "Asia/Tokyo" in fuso["description"]
 
 
 def test_log_mostra_argomenti_ricevuti(caplog):
-    llm = LlmFinto([richiesta_con_args({}), AIMessage("Ok.")])
+    llm = LlmFinto([richiesta("ora_corrente", {}), AIMessage("Ok.")])
     with caplog.at_level(logging.INFO, logger="assistente.grafo"):
         esegui(llm)
     assert "tool_call nome=ora_corrente args={}" in caplog.text
 
 
-@pytest.mark.parametrize("fuso", [5, ["Europe/Rome"], {"a": 1}])
-def test_argomento_fuso_non_stringa(fuso):
-    llm = LlmFinto([richiesta_ora(fuso), AIMessage("Riprovo.")])
-    stato = esegui(llm)
-    tool = tool_messages(stato)
-    assert tool[0].content.startswith("Errore:")
-    assert tool[0].tool_call_id == "c1"
-    assert stato["messaggi"][-1].content == "Riprovo."
+def test_argomenti_non_oggetto():
+    # AIMessage non accetta args non dict: si prova direttamente l'esecuzione.
+    registro = crea_strumenti(ADESSO, "Europe/Rome")
+    risultato = _esegui_strumento(registro, "ora_corrente", ["x"])
+    assert risultato == "Errore: argomenti non validi, atteso un oggetto JSON."
 
 
-def test_argomenti_extra_ignorati():
-    extra = AIMessage(
-        content="",
-        tool_calls=[
-            {"name": "ora_corrente", "args": {"fuso": "UTC", "altro": 1}, "id": "c1"}
-        ],
+def _solleva(args):
+    raise RuntimeError("guasto")
+
+
+def test_strumento_che_solleva(caplog):
+    rotto = Strumento(
+        definizione={
+            "type": "function",
+            "function": {
+                "name": "rotto",
+                "description": "Strumento di prova che fallisce.",
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+        },
+        esegui=_solleva,
     )
-    llm = LlmFinto([extra, AIMessage("Ok.")])
-    stato = esegui(llm)
-    assert tool_messages(stato)[0].content == "2026-01-15T12:00:00+00:00"
-    assert stato["messaggi"][-1].content == "Ok."
+    llm = LlmFinto([richiesta("rotto", {}), AIMessage("Mi dispiace.")])
+    with caplog.at_level(logging.ERROR, logger="assistente.grafo"):
+        stato = esegui(llm, strumenti={"rotto": rotto})
+    tool = tool_messages(stato)
+    assert tool[0].content == "Errore: errore interno dello strumento 'rotto'."
+    assert stato["interrotto"] is False
+    assert stato["messaggi"][-1].content == "Mi dispiace."
+    assert "guasto" in caplog.text
 
 
 def test_argomenti_json_malformati():
@@ -160,8 +147,9 @@ def test_argomenti_json_malformati():
     tool = tool_messages(stato)
     assert len(tool) == 1
     assert tool[0].tool_call_id == "c1"
-    assert tool[0].content.startswith("Errore:")
-    assert "JSON" in tool[0].content
+    assert tool[0].content == (
+        "Errore: argomenti non in formato JSON valido. Riprovare con un oggetto JSON."
+    )
     assert any(isinstance(m, ToolMessage) for m in llm.chiamate[1])
     assert stato["messaggi"][-1].content == "Riprovo con il fuso."
     assert stato["passaggi"] == 1

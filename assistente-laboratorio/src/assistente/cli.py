@@ -11,6 +11,7 @@ from langchain_core.messages import BaseMessage, HumanMessage
 from assistente.config import ErroreConfigurazione, carica_config
 from assistente.grafo import build_graph
 from assistente.modello import ErroreModello, crea_llm, verifica_modello
+from assistente.strumenti import crea_strumenti
 
 logger = logging.getLogger("assistente.cli")
 
@@ -77,12 +78,10 @@ def main() -> int:
             stream=sys.stderr,
         )
         verifica_modello(config)
-        grafo = build_graph(
-            crea_llm(config),
-            lambda: datetime.now(timezone.utc),
-            config.max_passaggi,
-            config.fuso_predefinito,
+        strumenti = crea_strumenti(
+            lambda: datetime.now(timezone.utc), config.fuso_predefinito
         )
+        grafo = build_graph(crea_llm(config), strumenti, config.max_passaggi)
         print("Assistente del laboratorio. Scrivere 'esci' per terminare.")
         ciclo(grafo, lambda: input("> "), print)
     except (ErroreConfigurazione, ErroreModello) as errore:

@@ -2,7 +2,7 @@
 
 from langchain_core.messages import AIMessage
 
-from assistente.strumenti import NOME_ORA_CORRENTE
+from assistente.strumenti.orologio import NOME_ORA_CORRENTE
 
 
 class LlmFinto:
@@ -29,6 +29,11 @@ class LlmFinto:
         # Come un modello vero, ogni invocazione produce un messaggio nuovo: senza
         # copia, add_messages (che deduplica per id) sostituirebbe la ripetizione.
         return risposta.model_copy(update={"id": None}, deep=True)
+
+
+def richiesta(nome: str, args, id: str = "c1") -> AIMessage:
+    """Una sola tool call verso lo strumento `nome`."""
+    return AIMessage(content="", tool_calls=[{"name": nome, "args": args, "id": id}])
 
 
 def richiesta_ora(fuso, id: str = "c1") -> AIMessage:
