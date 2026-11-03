@@ -1,0 +1,21 @@
+{
+  "nazionali": {
+    "01-01": "Capodanno",
+    "01-06": "Epifania",
+    "04-25": "Festa della Liberazione",
+    "05-01": "Festa del Lavoro",
+    "06-02": "Festa della Repubblica",
+    "08-15": "Ferragosto",
+    "11-01": "Ognissanti",
+    "12-08": "Immacolata Concezione",
+    "12-25": "Natale",
+    "12-26": "Santo Stefano"
+  },
+  "patroni": {
+    "Pordenone": {"data": "04-25", "santo": "San Marco"},
+    "Udine": {"data": "07-12", "santo": "Santi Ermacora e Fortunato"},
+    "Trieste": {"data": "11-03", "santo": "San Giusto"},
+    "Venezia": {"data": "04-25", "santo": "San Marco"},
+    "Roma": {"data": "06-29", "santo": "Santi Pietro e Paolo"}
+  }
+}
