@@ -43,8 +43,9 @@ Variabili: `LMSTUDIO_BASE_URL` (default nell'esempio `http://localhost:1234/v1`)
 `LMSTUDIO_REASONING_EFFORT` (default `none`; ammessi `none`, `low`, `medium`, `high`) e
 `FUSO_PREDEFINITO` (default `Europe/Rome`, nome IANA) e `CITTA_PATRONO` (facoltativa, per esempio
 `Pordenone`). Un valore non ammesso per `LMSTUDIO_REASONING_EFFORT` o `FUSO_PREDEFINITO`, o una città
-non presente in `src/assistente/strumenti/festivita.json`, ferma l'avvio con un errore che cita la
-variabile (uscita 1).
+non presente in `src/assistente/strumenti/festivita.json`, ferma l'avvio con un errore (uscita 1). Per
+una città sconosciuta il messaggio è `Città del patrono sconosciuta: '<valore>'. Città disponibili: ...
+(file ...)`; verificato il 2026-11-03 con `CITTA_PATRONO=Milano` (uscita 1).
 
 `CITTA_PATRONO` aggiunge ai giorni festivi del calendario la festa del patrono della città (maiuscole
 e spazi esterni ignorati). Per aggiungere una città: aggiungere in `patroni` di
@@ -103,7 +104,7 @@ Il modello li richiede tramite tool calling; il programma li esegue davvero (reg
 
 - **Calendario** (`calendario`): due operazioni su date `AAAA-MM-GG` (anni 1583-9999).
   `differenza` conta i giorni fra due date, `aggiungi` somma o sottrae N giorni a una data, di
-  calendario o solo lavorativi. Sono festivi sabato, domenica, le festività italiane (Pasqua calcolata,
+  calendario o solo lavorativi. Non sono lavorativi sabato, domenica, le festività italiane (Pasqua calcolata,
   Pasquetta, 1/1, 6/1, 25/4, 1/5, 2/6, 15/8, 1/11, 8/12, 25/12, 26/12) e il patrono di `CITTA_PATRONO`.
   Convenzione: la data di partenza è esclusa e quella di arrivo inclusa, quindi per i lavorativi di
   dicembre si parte dal 30 novembre. Per «oggi» il modello deve prima chiamare l'orologio. Esempio:
@@ -117,13 +118,15 @@ Il modello li richiede tramite tool calling; il programma li esegue davvero (reg
 ```
 I test non richiedono un modello attivo (esito verificato il 2026-11-03: 353 passati, 11 deselezionati).
 
-## Da verificare (non ancora eseguito)
+## Docker: verificato e da verificare
 Su Python 3.14 sono verificati: l'installazione di `requirements.txt` in un `.venv` locale, i test
 automatici, `docker compose build` (immagine con Python 3.14.9) e l'avvio del container senza
 `LMSTUDIO_MODEL` (errore che cita la variabile, uscita 1). Il 2026-10-26 il container ha anche
 conversato con LM Studio sull'host (`docker run -i` con le variabili passate con `-e`): il modello
-ha chiamato `ora_corrente` con `Asia/Tokyo` e risposto con l'ora corretta. Non è stato eseguito
-`docker compose run`, perché richiede un `.env` reale.
+ha chiamato `ora_corrente` con `Asia/Tokyo` e risposto con l'ora corretta. Il 2026-11-03 è stato eseguito
+anche `docker compose run --rm -T -e CITTA_PATRONO=Pordenone assistente` con input da pipe: il
+container ha raggiunto LM Studio, chiamato gli strumenti e terminato con uscita 0 (dettagli in
+«Verifiche reali»).
 
 ```powershell
 docker compose build
@@ -132,7 +135,8 @@ docker compose run --rm assistente
 Il servizio imposta `LMSTUDIO_BASE_URL=http://host.docker.internal:1234/v1`, che prevale
 sul valore del file `.env`. Atteso senza `LMSTUDIO_MODEL`: errore che cita la variabile, uscita 1.
 
-La prova in Docker (raggiungibilità di LM Studio dal container, log) non è stata eseguita.
+Ancora da verificare: l'avvio interattivo senza `-T` (con terminale) di `docker compose run --rm
+assistente`, e l'esame dei log del container.
 
 ## Verifiche reali
 Eseguite il 2026-10-26 con LM Studio sull'host (`http://localhost:1234/v1`) e il modello
