@@ -25,6 +25,7 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
   ed eseguito davvero dal programma;
 - offre una calcolatrice sicura (quattro operazioni e parentesi, decimali esatti, senza `eval`);
 - offre un convertitore di unità SI (unità di base e derivate con prefisso, aree, volumi, K e °C);
+- offre un calendario: differenza fra date e data + N giorni, di calendario o lavorativi, con festività italiane e patrono;
 - si avvia anche con Docker Compose.
 
 ## Confini

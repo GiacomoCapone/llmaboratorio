@@ -7,7 +7,8 @@ Richiedono LMSTUDIO_BASE_URL e LMSTUDIO_MODEL nell'ambiente. Lanciare con:
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 from langchain_core.messages import HumanMessage, ToolMessage
@@ -26,7 +27,9 @@ def esegui_domanda(domanda, caplog):
     verifica_modello(config)
     grafo = build_graph(
         crea_llm(config),
-        crea_strumenti(lambda: datetime.now(timezone.utc), config.fuso_predefinito),
+        crea_strumenti(
+            lambda: datetime.now(timezone.utc), config.fuso_predefinito, config.citta_patrono
+        ),
         config.max_passaggi,
     )
     inizio = time.perf_counter()
@@ -89,3 +92,42 @@ def test_il_modello_usa_il_convertitore(caplog, domanda, risultato, forme):
     assert risultato in validi, f"nessun ToolMessage uguale a {risultato!r}: {validi}"
     finale = str(stato["messaggi"][-1].content)
     assert any(f in finale for f in forme), f"risposta senza il risultato: {finale!r}"
+
+
+@pytest.mark.parametrize(
+    "domanda, risultato, forme",
+    [
+        (
+            "Quanti giorni lavorativi ci sono dal 1° al 31 dicembre 2026?",
+            "20 lavorativi",
+            ("20",),
+        ),
+        (
+            "Che data è 10 giorni lavorativi dopo il 18 dicembre 2026?",
+            "2027-01-05",
+            ("5 gennaio 2027", "2027-01-05"),
+        ),
+    ],
+)
+def test_il_modello_usa_il_calendario(caplog, domanda, risultato, forme):
+    stato, validi = esegui_domanda(domanda, caplog)
+    assert "tool_call nome=calendario" in caplog.text
+    assert any(risultato in v for v in validi), f"nessun ToolMessage con {risultato!r}: {validi}"
+    finale = str(stato["messaggi"][-1].content)
+    assert any(f in finale for f in forme), f"risposta senza il risultato: {finale!r}"
+
+
+def test_catena_orologio_calendario(caplog):
+    config = carica_config()
+    _, validi = esegui_domanda("Che giorno sarà fra 30 giorni?", caplog)
+    orologio = caplog.text.find("tool_call nome=ora_corrente")
+    calendario = caplog.text.find("tool_call nome=calendario")
+    assert orologio != -1, "ora_corrente non chiamato"
+    assert calendario != -1, "calendario non chiamato"
+    assert orologio < calendario, "calendario chiamato prima di ora_corrente"
+    atteso = (
+        datetime.now(ZoneInfo(config.fuso_predefinito)).date() + timedelta(days=30)
+    ).isoformat()
+    assert any(" = " in v and v.split(" = ", 1)[1].startswith(atteso) for v in validi), (
+        f"nessun ToolMessage con arrivo {atteso}: {validi}"
+    )
