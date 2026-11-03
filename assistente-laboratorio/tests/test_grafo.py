@@ -284,6 +284,23 @@ def test_risposta_vuota_senza_strumenti_non_ripete():
     assert stato["messaggi"][-1].content == ""
 
 
+def test_tool_call_calendario():
+    llm = LlmFinto(
+        [
+            richiesta(
+                "calendario",
+                {"operazione": "aggiungi", "data": "2026-12-18", "giorni": 10, "lavorativi": True},
+            ),
+            AIMessage("Il 5 gennaio."),
+        ]
+    )
+    stato = esegui(llm, testo="Tra 10 giorni lavorativi dal 18 dicembre?")
+    assert (
+        tool_messages(stato)[0].content
+        == "2026-12-18 (venerdì) + 10 giorni lavorativi = 2027-01-05 (martedì)"
+    )
+
+
 def test_tool_call_converti_unita():
     llm = LlmFinto(
         [

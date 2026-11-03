@@ -28,6 +28,7 @@ class Config:
     log_level: str
     reasoning_effort: str
     fuso_predefinito: str
+    citta_patrono: str | None = None
 
 
 def _obbligatoria(env: Mapping[str, str], nome: str) -> str:
@@ -82,6 +83,14 @@ def carica_config(env: Mapping[str, str] | None = None) -> Config:
             "Usare un nome IANA come Europe/Rome."
         ) from None
 
+    citta_patrono = env.get("CITTA_PATRONO", "").strip() or None
+
     return Config(
-        base_url, model, max_passaggi, log_level, reasoning_effort, fuso_predefinito
+        base_url,
+        model,
+        max_passaggi,
+        log_level,
+        reasoning_effort,
+        fuso_predefinito,
+        citta_patrono,
     )

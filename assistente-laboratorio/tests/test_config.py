@@ -71,6 +71,17 @@ def test_fuso_predefinito_non_valido(valore):
         carica_config({**BASE, "FUSO_PREDEFINITO": valore})
 
 
+@pytest.mark.parametrize(
+    "valore, atteso",
+    [("Pordenone", "Pordenone"), (" Udine ", "Udine"), ("", None), (None, None)],
+)
+def test_citta_patrono(valore, atteso):
+    env = dict(BASE)
+    if valore is not None:
+        env["CITTA_PATRONO"] = valore
+    assert carica_config(env).citta_patrono == atteso
+
+
 def scrivi_env(tmp_path, testo):
     percorso = tmp_path / ".env"
     percorso.write_text(testo, encoding="utf-8")

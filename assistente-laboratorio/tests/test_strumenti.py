@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 
 import pytest
 
+from assistente.config import ErroreConfigurazione
+
 from assistente.strumenti import Strumento, crea_strumenti, registro
 from assistente.strumenti.calcolatrice import DEFINIZIONE_CALCOLA, esegui_calcola
 
@@ -13,6 +15,7 @@ def test_registro_contiene_gli_strumenti():
         "ora_corrente",
         "calcola",
         "converti_unita",
+        "calendario",
     ]
 
 
@@ -30,3 +33,15 @@ def test_nomi_duplicati():
     doppio = [Strumento(DEFINIZIONE_CALCOLA, esegui_calcola)] * 2
     with pytest.raises(ValueError, match="nome duplicato nel registro: 'calcola'"):
         registro(doppio)
+
+
+def test_registro_citta_sconosciuta():
+    with pytest.raises(ErroreConfigurazione):
+        crea_strumenti(ADESSO, "Europe/Rome", "Milano")
+
+
+def test_registro_cita_il_patrono():
+    descrizione = crea_strumenti(ADESSO, "Europe/Rome", "pordenone")["calendario"].definizione[
+        "function"
+    ]["description"]
+    assert "patrono di Pordenone" in descrizione

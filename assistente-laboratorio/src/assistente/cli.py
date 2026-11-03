@@ -80,7 +80,9 @@ def main() -> int:
         )
         verifica_modello(config)
         strumenti = crea_strumenti(
-            lambda: datetime.now(timezone.utc), config.fuso_predefinito
+            lambda: datetime.now(timezone.utc),
+            config.fuso_predefinito,
+            config.citta_patrono,
         )
         grafo = build_graph(crea_llm(config), strumenti, config.max_passaggi)
         print("Assistente del laboratorio. Scrivere 'esci' per terminare.")

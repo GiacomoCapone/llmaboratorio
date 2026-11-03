@@ -5,7 +5,9 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from assistente.strumenti.calcolatrice import DEFINIZIONE_CALCOLA, esegui_calcola
+from assistente.strumenti.calendario import definizione_calendario, esegui_calendario
 from assistente.strumenti.convertitore import DEFINIZIONE_CONVERTI, esegui_converti
+from assistente.strumenti.festivita import carica_festivita
 from assistente.strumenti.orologio import definizione_ora_corrente, esegui_ora_corrente
 
 
@@ -30,9 +32,12 @@ def registro(strumenti: list[Strumento]) -> dict[str, Strumento]:
 
 
 def crea_strumenti(
-    adesso: Callable[[], datetime], fuso_predefinito: str
+    adesso: Callable[[], datetime],
+    fuso_predefinito: str,
+    citta_patrono: str | None = None,
 ) -> dict[str, Strumento]:
     """Costruisce il registro, legando a ciascuno strumento le sue dipendenze."""
+    festivita = carica_festivita(citta_patrono)
     strumenti = [
         Strumento(
             definizione_ora_corrente(fuso_predefinito),
@@ -40,5 +45,9 @@ def crea_strumenti(
         ),
         Strumento(DEFINIZIONE_CALCOLA, esegui_calcola),
         Strumento(DEFINIZIONE_CONVERTI, esegui_converti),
+        Strumento(
+            definizione_calendario(festivita.citta),
+            lambda args: esegui_calendario(args, festivita),
+        ),
     ]
     return registro(strumenti)
