@@ -217,7 +217,7 @@ Un argomento `null` vale come mancante.
   `HEAD`).
 
 ## Criteri di successo
-- `python -m pytest` e `python -m pytest -m reale -v` verdi con `google/gemma-4-e2b`.
+- `python -m pytest` e `python -m pytest -m reale -v` tutte passate, salvo la catena senza «oggi» segnata `xfail` con `google/gemma-4-e2b`.
 - Nessuna data non ISO accettata; conteggi coerenti fra `differenza` e `aggiungi`.
 
 ## Limiti noti

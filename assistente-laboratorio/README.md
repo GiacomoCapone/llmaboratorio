@@ -115,7 +115,7 @@ Il modello li richiede tramite tool calling; il programma li esegue davvero (reg
 ```powershell
 .venv\Scripts\python.exe -m pytest
 ```
-I test non richiedono un modello attivo (esito verificato il 2026-11-03: 353 passati, 10 deselezionati).
+I test non richiedono un modello attivo (esito verificato il 2026-11-03: 353 passati, 11 deselezionati).
 
 ## Da verificare (non ancora eseguito)
 Su Python 3.14 sono verificati: l'installazione di `requirements.txt` in un `.venv` locale, i test
@@ -191,9 +191,12 @@ sono 2,5 km?», «Quanto fa 12,5 * 4?», «che ore sono» nella stessa sessione:
 con la tool call dello strumento giusto.
 
 Il 2026-11-03, con il calendario (quattro strumenti) e `CITTA_PATRONO=Pordenone` nell'ambiente del
-processo (non nel `.env`): `python -m pytest -q` → `353 passed, 10 deselected in 6.86s`;
-`CITTA_PATRONO=Pordenone python -m pytest -m reale -v -s` → `10 passed, 353 deselected, 1 xfailed in
-109.22s`. Passano le sette prove precedenti, le due del calendario («Quanti giorni lavorativi ci sono
+processo (non nel `.env`): `.venv\Scripts\python.exe -m pytest -q` → `353 passed, 11 deselected in 6.67s`;
+```powershell
+$env:CITTA_PATRONO='Pordenone'; .venv\Scripts\python.exe -m pytest -m reale -v -s
+```
+→ `10 passed, 353 deselected, 1 xfailed in 110.41s` (eseguito in PowerShell il 2026-11-03; una prima
+esecuzione in bash con `CITTA_PATRONO=Pordenone` davanti al comando: `109.22s`, stesso esito). Passano le sette prove precedenti, le due del calendario («Quanti giorni lavorativi ci sono
 dal 1° al 31 dicembre 2026?» → `calendario` con `operazione=differenza`, `20 lavorativi`; «Che data è 10
 giorni lavorativi dopo il 18 dicembre 2026?» → `2027-01-05`) e la catena «Che giorno sarà tra 30 giorni
 a partire da oggi?» (`ora_corrente` poi `calendario`, data di arrivo corretta). È un fallimento atteso
