@@ -192,14 +192,17 @@ con la tool call dello strumento giusto.
 
 Il 2026-11-03, con il calendario (quattro strumenti) e `CITTA_PATRONO=Pordenone` nell'ambiente del
 processo (non nel `.env`): `python -m pytest -q` → `353 passed, 10 deselected in 6.86s`;
-`CITTA_PATRONO=Pordenone python -m pytest -m reale -v -s` → `1 failed, 9 passed in 105.52s`. Passano le
-sette prove precedenti e le due del calendario («Quanti giorni lavorativi ci sono dal 1° al 31 dicembre
-2026?» → `calendario` con `operazione=differenza`, `20 lavorativi`; «Che data è 10 giorni lavorativi dopo
-il 18 dicembre 2026?» → `2027-01-05`). Fallisce `test_catena_orologio_calendario` («Che giorno sarà fra
-30 giorni?»): nel test il modello risponde chiedendo la data odierna, senza chiamare alcuno strumento
-(4 esecuzioni su 4 fallite, anche con uno script che usa il grafo allo stesso modo). Con `avvia.py` la
-stessa domanda ha invece concatenato `ora_corrente` e `calendario` (3 esecuzioni su 3), con risposta
-«Il giorno fra 30 giorni sarà il 2026-12-03.». Causa non ancora diagnosticata.
+`CITTA_PATRONO=Pordenone python -m pytest -m reale -v -s` → `10 passed, 353 deselected, 1 xfailed in
+109.22s`. Passano le sette prove precedenti, le due del calendario («Quanti giorni lavorativi ci sono
+dal 1° al 31 dicembre 2026?» → `calendario` con `operazione=differenza`, `20 lavorativi`; «Che data è 10
+giorni lavorativi dopo il 18 dicembre 2026?» → `2027-01-05`) e la catena «Che giorno sarà tra 30 giorni
+a partire da oggi?» (`ora_corrente` poi `calendario`, data di arrivo corretta). È un fallimento atteso
+(`xfail`) la catena con la domanda «Che giorno sarà fra 30 giorni?»: in contesto nuovo `google/gemma-4-e2b`
+non chiama alcuno strumento e chiede la data odierna (fallita 5 volte su 5, con temperatura 0 l'esito è
+stabile). Limite noto della catena: dipende dalla formulazione. Riesce quando l'utente nomina «oggi» o
+quando la data è già nella conversazione; altrimenti il modello può chiedere la data o addirittura
+inventarla (osservato: «Che data sarà fra 30 giorni?» ha chiamato `calendario` con una data di partenza
+inventata, 2024-05-17).
 
 Prova manuale 2026-11-03 con `python avvia.py` (stessa sessione): «Quanti giorni lavorativi mancano dal
 3 novembre 2026 a Natale?» → `calendario` (differenza dal 2026-11-03 al 2026-12-25 con lavorativi),
@@ -245,6 +248,10 @@ novembre 2026 a Natale?», «che ore sono», `esci`): il container raggiunge LM 
   `google/gemma-4-e2b` risponde spesso ai risultati con un testo vuoto. Il programma richiama allora il
   modello una volta senza strumenti, che produce la risposta. È atteso; se anche la seconda risposta è
   vuota, la CLI mostra `(il modello non ha prodotto una risposta)`.
+- **Input accentato corrotto con una pipe da Git Bash (Windows)**: senza `PYTHONIOENCODING=utf-8`
+  la CLI riceve «sarÃ » al posto di «sarà» (osservato il 2026-11-03; con la variabile impostata il
+  testo arriva corretto). Da PowerShell il testo arriva corretto. Il modello può rispondere in modo
+  diverso a testo corrotto: le prove manuali con input accentato vanno fatte con input ben codificato.
 - **Ctrl-C**: durante una risposta annulla solo il turno (`(turno annullato)`, cronologia
   invariata); all'avvio termina il programma con codice 130. Questi due comportamenti sono
   coperti dai test automatici, non provati a mano con LM Studio.

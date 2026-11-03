@@ -199,8 +199,11 @@ Un argomento `null` vale come mancante.
 - `Che data è 10 giorni lavorativi dopo il 18 dicembre 2026?` → tool call `calendario` con
   `operazione=aggiungi` e `lavorativi` vero, ToolMessage con `2027-01-05`, risposta con `5 gennaio 2027`
   o `2027-01-05`.
-- `Che giorno sarà fra 30 giorni?` (catena) → tool call `ora_corrente` e poi `calendario`; ToolMessage di
-  `calendario` con la data di oggi (fuso predefinito) + 30 giorni.
+- Catena, due formulazioni; in entrambe tool call `ora_corrente` e poi `calendario`, ToolMessage di
+  `calendario` con la data di oggi (fuso predefinito) + 30 giorni:
+  - `Che giorno sarà fra 30 giorni?`: fallimento atteso e documentato (`xfail`), perché con
+    `google/gemma-4-e2b` e contesto nuovo il modello chiede la data senza chiamare strumenti;
+  - `Che giorno sarà tra 30 giorni a partire da oggi?`: deve passare.
 - Le sette prove esistenti devono continuare a passare con quattro strumenti.
 - Se una prova fallisce: fermarsi, diagnosticare con il log e riportare prima di cambiare descrizioni o
   specifica.
@@ -220,7 +223,8 @@ Un argomento `null` vale come mancante.
 ## Limiti noti
 - Per «quanti giorni lavorativi ci sono a dicembre» il modello deve partire dall'ultimo giorno del mese
   precedente; partendo dal 1° il primo giorno non è contato (convenzione concordata).
-- Per «oggi» servono due chiamate (`ora_corrente`, poi `calendario`): con un modello piccolo la catena può
-  non riuscire; la verifica reale lo misura.
+- Per «oggi» servono due chiamate (`ora_corrente`, poi `calendario`) e con `google/gemma-4-e2b` la
+  catena dipende dalla formulazione: riesce se la domanda nomina «oggi» o se la data è già nella
+  conversazione; altrimenti il modello può chiedere la data o inventarla (misurato il 2026-11-03).
 - Con un quarto strumento le definizioni crescono: la regola sulla risposta vuota del ciclo 1 resta
   necessaria e le prove reali verificano che basti.
