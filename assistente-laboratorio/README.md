@@ -41,8 +41,15 @@ valore del file; così Docker Compose imposta l'indirizzo dell'host per il conta
 Variabili: `LMSTUDIO_BASE_URL` (default nell'esempio `http://localhost:1234/v1`), `LMSTUDIO_MODEL`
 (obbligatoria), `MAX_PASSAGGI` (default 5), `LOG_LEVEL` (default INFO),
 `LMSTUDIO_REASONING_EFFORT` (default `none`; ammessi `none`, `low`, `medium`, `high`) e
-`FUSO_PREDEFINITO` (default `Europe/Rome`, nome IANA). Un valore non ammesso per una delle ultime
-due ferma l'avvio con un errore che cita la variabile (uscita 1).
+`FUSO_PREDEFINITO` (default `Europe/Rome`, nome IANA) e `CITTA_PATRONO` (facoltativa, per esempio
+`Pordenone`). Un valore non ammesso per `LMSTUDIO_REASONING_EFFORT` o `FUSO_PREDEFINITO`, o una città
+non presente in `src/assistente/strumenti/festivita.json`, ferma l'avvio con un errore che cita la
+variabile (uscita 1).
+
+`CITTA_PATRONO` aggiunge ai giorni festivi del calendario la festa del patrono della città (maiuscole
+e spazi esterni ignorati). Per aggiungere una città: aggiungere in `patroni` di
+`src/assistente/strumenti/festivita.json` una voce come `"Pordenone": {"data": "04-25", "santo": "San Marco"}`
+(data `MM-GG`) e rilanciare i test.
 
 `FUSO_PREDEFINITO` è il fuso usato dall'orologio quando la domanda non indica un luogo
 («che ore sono»); il modello lo legge nella definizione dello strumento.
@@ -94,11 +101,21 @@ Il modello li richiede tramite tool calling; il programma li esegue davvero (reg
   `Ω`. Non accetta unità non SI (ore, litri, km/h, unità imperiali) né conversioni fra grandezze
   diverse, per esempio `Errore: non si può convertire 'kg' (massa) in 'm' (lunghezza): grandezze diverse.`
 
+- **Calendario** (`calendario`): due operazioni su date `AAAA-MM-GG` (anni 1583-9999).
+  `differenza` conta i giorni fra due date, `aggiungi` somma o sottrae N giorni a una data, di
+  calendario o solo lavorativi. Sono festivi sabato, domenica, le festività italiane (Pasqua calcolata,
+  Pasquetta, 1/1, 6/1, 25/4, 1/5, 2/6, 15/8, 1/11, 8/12, 25/12, 26/12) e il patrono di `CITTA_PATRONO`.
+  Convenzione: la data di partenza è esclusa e quella di arrivo inclusa, quindi per i lavorativi di
+  dicembre si parte dal 30 novembre. Per «oggi» il modello deve prima chiamare l'orologio. Esempio:
+  `dal 2026-12-01 (martedì) al 2026-12-31 (giovedì): 30 giorni di calendario, 20 lavorativi;
+  festività nell'intervallo: 2026-12-08 Immacolata Concezione, 2026-12-25 Natale, 2026-12-26 Santo Stefano`.
+  Errori in forma `Errore: ...`, per esempio `Errore: data non valida: '05/02/2026'. ...`.
+
 ## Test
 ```powershell
 .venv\Scripts\python.exe -m pytest
 ```
-I test non richiedono un modello attivo (esito verificato il 2026-11-02: 247 passati, 7 deselezionati).
+I test non richiedono un modello attivo (esito verificato il 2026-11-03: 353 passati, 10 deselezionati).
 
 ## Da verificare (non ancora eseguito)
 Su Python 3.14 sono verificati: l'installazione di `requirements.txt` in un `.venv` locale, i test
@@ -173,8 +190,26 @@ Il 2026-11-02, con tre strumenti (orologio, calcolatrice, convertitore): `python
 sono 2,5 km?», «Quanto fa 12,5 * 4?», «che ore sono» nella stessa sessione: risposte corrette, ognuna
 con la tool call dello strumento giusto.
 
-Non verificato: avvio con Docker (vedi sezione precedente; il 2026-11-02 Docker Desktop non era attivo).
-L'immagine va ricostruita (`docker compose build`) perché `requirements.txt` ora include `python-dotenv`.
+Il 2026-11-03, con il calendario (quattro strumenti) e `CITTA_PATRONO=Pordenone` nell'ambiente del
+processo (non nel `.env`): `python -m pytest -q` → `353 passed, 10 deselected in 6.86s`;
+`CITTA_PATRONO=Pordenone python -m pytest -m reale -v -s` → `1 failed, 9 passed in 105.52s`. Passano le
+sette prove precedenti e le due del calendario («Quanti giorni lavorativi ci sono dal 1° al 31 dicembre
+2026?» → `calendario` con `operazione=differenza`, `20 lavorativi`; «Che data è 10 giorni lavorativi dopo
+il 18 dicembre 2026?» → `2027-01-05`). Fallisce `test_catena_orologio_calendario` («Che giorno sarà fra
+30 giorni?»): nel test il modello risponde chiedendo la data odierna, senza chiamare alcuno strumento
+(4 esecuzioni su 4 fallite, anche con uno script che usa il grafo allo stesso modo). Con `avvia.py` la
+stessa domanda ha invece concatenato `ora_corrente` e `calendario` (3 esecuzioni su 3), con risposta
+«Il giorno fra 30 giorni sarà il 2026-12-03.». Causa non ancora diagnosticata.
+
+Prova manuale 2026-11-03 con `python avvia.py` (stessa sessione): «Quanti giorni lavorativi mancano dal
+3 novembre 2026 a Natale?» → `calendario` (differenza dal 2026-11-03 al 2026-12-25 con lavorativi),
+risultato `52 giorni di calendario, 36 lavorativi`; «Quanto fa 12,5 * 4?» → `calcola`, `50`;
+«che ore sono» → `ora_corrente`.
+
+Docker 2026-11-03 (Docker Desktop attivo): `docker compose build` riuscito; `docker compose run --rm -T
+-e CITTA_PATRONO=Pordenone assistente` con input da pipe («Quanti giorni lavorativi mancano dal 3
+novembre 2026 a Natale?», «che ore sono», `esci`): il container raggiunge LM Studio, chiama `calendario`
+(36 lavorativi) e `ora_corrente`, uscita 0.
 
 ## Diagnosi
 - **Variabile mancante nonostante il `.env`**: il file letto è `assistente-laboratorio/.env`; una
