@@ -253,3 +253,23 @@ def test_giorni_enormi(fest):
         assert esegui_calendario(_agg(giorni=g), fest) == fuori
     r = esegui_calendario(_agg(giorni="9" * 5000), fest)
     assert "deve essere un numero intero" in r or "fuori" in r
+
+
+@pytest.mark.parametrize(
+    "inizio, fine, giorni",
+    [
+        (date(9999, 12, 1), date(9999, 12, 31), 30),
+        (date(9999, 12, 31), date(9999, 12, 31), 0),
+        (date(9999, 12, 31), date(9999, 12, 1), -30),
+        (date(1583, 1, 31), date(1583, 1, 1), -30),
+        (date(1583, 1, 1), date(1583, 1, 1), 0),
+        (date(1583, 1, 1), date(1583, 1, 31), 30),
+    ],
+)
+def test_differenza_ai_bordi_senza_eccezioni(fest, inizio, fine, giorni):
+    r = differenza(inizio, fine, fest)
+    assert f": {giorni} giorni di calendario, " in r
+    if giorni == 0:
+        assert r.endswith("0 lavorativi; nessuna festività nell'intervallo")
+    args = {"operazione": "differenza", "data": inizio.isoformat(), "data_fine": fine.isoformat()}
+    assert esegui_calendario(args, fest) == r

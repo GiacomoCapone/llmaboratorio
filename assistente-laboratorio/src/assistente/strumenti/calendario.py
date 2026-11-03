@@ -94,22 +94,17 @@ def differenza(inizio: date, fine: date, festivita: Festivita) -> str:
     if abs(giorni) > _MAX_DIFFERENZA:
         return _ERR_LUNGO
     if giorni >= 0:
-        primo, ultimo = inizio + timedelta(days=1), fine
+        primo, ultimo = inizio.toordinal() + 1, fine.toordinal()
     else:
-        primo, ultimo = fine, inizio - timedelta(days=1)
+        primo, ultimo = fine.toordinal(), inizio.toordinal() - 1
     lavorativi = 0
     elenco: list[tuple[date, str]] = []
-    if primo <= ultimo:
-        giorno = primo
-        while giorno <= ultimo:
-            if festivita.lavorativo(giorno):
-                lavorativi += 1
-            giorno += timedelta(days=1)
-        for anno in range(primo.year, ultimo.year + 1):
-            elenco.extend(
-                (g, nome) for g, nome in festivita.dell_anno(anno).items() if primo <= g <= ultimo
-            )
-        elenco.sort()
+    for ordinale in range(primo, ultimo + 1):
+        giorno = date.fromordinal(ordinale)
+        if festivita.lavorativo(giorno):
+            lavorativi += 1
+        if giorno in festivita.dell_anno(giorno.year):
+            elenco.append((giorno, festivita.dell_anno(giorno.year)[giorno]))
     segno = -1 if giorni < 0 else 1
     if not elenco:
         coda = "nessuna festività nell'intervallo"
