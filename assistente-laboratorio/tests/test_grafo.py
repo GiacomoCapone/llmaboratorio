@@ -7,20 +7,24 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from assistente.grafo import (
     ISTRUZIONE_RISPOSTA,
     MESSAGGIO_LIMITE,
+    MESSAGGIO_RIFIUTO,
     _esegui_strumento,
     build_graph,
     instrada_dopo_modello,
+    instrada_dopo_router,
 )
 from assistente.strumenti import Strumento, crea_strumenti
-from finti import LlmFinto, richiesta, richiesta_malformata, richiesta_ora
+from finti import LlmFinto, RouterFinto, richiesta, richiesta_malformata, richiesta_ora
 
 ADESSO = lambda: datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)  # noqa: E731
 
 
-def esegui(llm, max_passaggi=5, testo="Che ore sono?", strumenti=None):
+def esegui(llm, max_passaggi=5, testo="Che ore sono?", strumenti=None, router=None):
     if strumenti is None:
         strumenti = crea_strumenti(ADESSO, "Europe/Rome")
-    grafo = build_graph(llm, strumenti, max_passaggi)
+    if router is None:
+        router = RouterFinto("conversazione")
+    grafo = build_graph(llm, strumenti, max_passaggi, router)
     return grafo.invoke(
         {"messaggi": [HumanMessage(testo)], "passaggi": 0, "interrotto": False}
     )
@@ -325,3 +329,43 @@ def test_tool_call_converti_unita():
     )
     stato = esegui(llm, testo="Quanti metri sono 2,5 km?")
     assert tool_messages(stato)[0].content == "2500 m"
+
+
+def test_router_in_ambito_passa_all_agente(caplog):
+    llm = LlmFinto([AIMessage("Sono le 13.")])
+    router = RouterFinto("conversazione", "domanda sull'ora")
+    with caplog.at_level(logging.INFO, logger="assistente.grafo"):
+        stato = esegui(llm, router=router)
+    assert stato["messaggi"][-1].content == "Sono le 13."
+    assert len(llm.chiamate) == 1
+    assert stato["categoria"] == "conversazione"
+    assert "router categoria=conversazione motivo=domanda sull'ora → agente" in caplog.text
+    assert "agente: chiamata al modello" in caplog.text
+
+
+def test_router_fuori_ambito_rifiuta_senza_agente(caplog):
+    llm = LlmFinto([])
+    router = RouterFinto("fuori_ambito", "poesia")
+    with caplog.at_level(logging.INFO, logger="assistente.grafo"):
+        stato = esegui(llm, testo="Scrivi una poesia", router=router)
+    assert llm.chiamate == []
+    ultimo = stato["messaggi"][-1]
+    assert isinstance(ultimo, AIMessage)
+    assert ultimo.content == MESSAGGIO_RIFIUTO.format(motivo="poesia")
+    assert stato["categoria"] == "fuori_ambito"
+    assert stato["interrotto"] is False
+    assert "router categoria=fuori_ambito motivo=poesia → rifiuto" in caplog.text
+    assert "agente:" not in caplog.text
+
+
+def test_router_riceve_la_cronologia():
+    router = RouterFinto("conversazione")
+    esegui(LlmFinto([AIMessage("ok")]), testo="Che giorno è?", router=router)
+    assert router.chiamate[0][-1].content == "Che giorno è?"
+
+
+@pytest.mark.parametrize(
+    "categoria, atteso", [("conversazione", "agente"), ("fuori_ambito", "rifiuto")]
+)
+def test_instradamento_dopo_router(categoria, atteso):
+    assert instrada_dopo_router({"categoria": categoria}) == atteso

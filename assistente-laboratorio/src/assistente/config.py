@@ -17,6 +17,8 @@ PERCORSO_ENV = PERCORSO_ENV_PROGETTO
 CARTELLA_PROGETTO = PERCORSO_ENV_PROGETTO.parent
 # Database delle note: il server «archivio» lo riceve dall'ambiente (assistente non importa archivio).
 NOTE_DB_PREDEFINITO = CARTELLA_PROGETTO / "dati" / "note.db"
+# Descrizione dell'ambito usata dal router (testo libero, versionato).
+AMBITO_PREDEFINITO = CARTELLA_PROGETTO / "ambito.txt"
 
 
 class ErroreConfigurazione(Exception):
@@ -33,6 +35,7 @@ class Config:
     fuso_predefinito: str
     citta_patrono: str | None = None
     note_db: Path = NOTE_DB_PREDEFINITO
+    ambito: str = ""
 
 
 def _obbligatoria(env: Mapping[str, str], nome: str) -> str:
@@ -43,6 +46,23 @@ def _obbligatoria(env: Mapping[str, str], nome: str) -> str:
             "(copiato da .env.example) o nell'ambiente."
         )
     return valore
+
+
+def _leggi_ambito(grezzo: str) -> str:
+    """Testo del file dell'ambito; percorso relativo alla cartella del progetto."""
+    percorso = Path(grezzo or AMBITO_PREDEFINITO.name)
+    if not percorso.is_absolute():
+        percorso = CARTELLA_PROGETTO / percorso
+    try:
+        testo = percorso.read_text(encoding="utf-8-sig").strip()
+    except OSError:
+        testo = ""
+    if not testo:
+        raise ErroreConfigurazione(
+            f"File dell'ambito {percorso} mancante o vuoto: descrivere l'ambito "
+            "dell'assistente in ambito.txt o indicare un altro file con AMBITO_FILE."
+        )
+    return testo
 
 
 def leggi_file_env(percorso: Path) -> dict[str, str]:
@@ -97,6 +117,8 @@ def carica_config(env: Mapping[str, str] | None = None) -> Config:
     else:
         note_db = NOTE_DB_PREDEFINITO
 
+    ambito = _leggi_ambito(env.get("AMBITO_FILE", "").strip())
+
     return Config(
         base_url,
         model,
@@ -106,4 +128,5 @@ def carica_config(env: Mapping[str, str] | None = None) -> Config:
         fuso_predefinito,
         citta_patrono,
         note_db,
+        ambito,
     )

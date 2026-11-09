@@ -12,6 +12,7 @@ from assistente.config import ErroreConfigurazione, carica_config
 from assistente.grafo import build_graph
 from assistente.mcp_client import ClientArchivio, ErroreArchivio
 from assistente.modello import ErroreModello, crea_llm, verifica_modello
+from assistente.router import crea_router
 from assistente.strumenti import crea_strumenti
 
 logger = logging.getLogger("assistente.cli")
@@ -91,7 +92,10 @@ def main() -> int:
                 config.citta_patrono,
                 esterni=archivio.strumenti(),
             )
-            grafo = build_graph(crea_llm(config), strumenti, config.max_passaggi)
+            llm = crea_llm(config)
+            grafo = build_graph(
+                llm, strumenti, config.max_passaggi, crea_router(llm, config.ambito)
+            )
             print("Assistente del laboratorio. Scrivere 'esci' per terminare.")
             ciclo(grafo, lambda: input("> "), print)
     except (ErroreConfigurazione, ErroreModello, ErroreArchivio) as errore:

@@ -174,3 +174,43 @@ def test_note_db(tmp_path, valore, atteso):
     cfg = carica_config(env)
     assert cfg.note_db.is_absolute()
     assert cfg.note_db == type(cfg.note_db)(atteso)
+
+
+def test_ambito_predefinito():
+    from assistente.config import AMBITO_PREDEFINITO
+
+    atteso = AMBITO_PREDEFINITO.read_text(encoding="utf-8-sig").strip()
+    assert atteso
+    assert carica_config(BASE).ambito == atteso
+
+
+def test_ambito_file_relativo(tmp_path, monkeypatch):
+    monkeypatch.setattr("assistente.config.CARTELLA_PROGETTO", tmp_path)
+    (tmp_path / "a.txt").write_text("Solo chimica.\n", encoding="utf-8")
+    assert carica_config({**BASE, "AMBITO_FILE": "a.txt"}).ambito == "Solo chimica."
+
+
+def test_ambito_file_assoluto(tmp_path):
+    percorso = tmp_path / "ambito.txt"
+    percorso.write_text("Solo fisica.", encoding="utf-8")
+    assert carica_config({**BASE, "AMBITO_FILE": str(percorso)}).ambito == "Solo fisica."
+
+
+def test_ambito_file_mancante(tmp_path):
+    percorso = tmp_path / "manca.txt"
+    with pytest.raises(ErroreConfigurazione) as errore:
+        carica_config({**BASE, "AMBITO_FILE": str(percorso)})
+    assert str(percorso) in str(errore.value)
+
+
+def test_ambito_file_vuoto(tmp_path):
+    percorso = tmp_path / "vuoto.txt"
+    percorso.write_text("  \n", encoding="utf-8")
+    with pytest.raises(ErroreConfigurazione):
+        carica_config({**BASE, "AMBITO_FILE": str(percorso)})
+
+
+def test_ambito_con_bom(tmp_path):
+    percorso = tmp_path / "bom.txt"
+    percorso.write_text("Ambito\n\n", encoding="utf-8-sig")
+    assert carica_config({**BASE, "AMBITO_FILE": str(percorso)}).ambito == "Ambito"

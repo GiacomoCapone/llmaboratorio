@@ -42,7 +42,9 @@ Variabili: `LMSTUDIO_BASE_URL` (default nell'esempio `http://localhost:1234/v1`)
 (obbligatoria), `MAX_PASSAGGI` (default 5), `LOG_LEVEL` (default INFO),
 `LMSTUDIO_REASONING_EFFORT` (default `none`; ammessi `none`, `low`, `medium`, `high`) e
 `FUSO_PREDEFINITO` (default `Europe/Rome`, nome IANA), `CITTA_PATRONO` (facoltativa, per esempio
-`Pordenone`) e `NOTE_DB` (facoltativa, percorso del database delle note; vedi «Note del laboratorio»). Un valore non ammesso per `LMSTUDIO_REASONING_EFFORT` o `FUSO_PREDEFINITO`, o una città
+`Pordenone`), `NOTE_DB` (facoltativa, percorso del database delle note; vedi «Note del laboratorio») e
+`AMBITO_FILE` (facoltativa, file che descrive l'ambito del router; default `ambito.txt`, vedi «Ambito e
+router»). Un valore non ammesso per `LMSTUDIO_REASONING_EFFORT` o `FUSO_PREDEFINITO`, o una città
 non presente in `src/assistente/strumenti/festivita.json`, ferma l'avvio con un errore (uscita 1). Per
 una città sconosciuta il messaggio è `Città del patrono sconosciuta: '<valore>'. Città disponibili: ...
 (file ...)`; verificato il 2026-11-03 con `CITTA_PATRONO=Milano` (uscita 1).
@@ -82,6 +84,38 @@ In alternativa resta `python -m assistente` con `$env:PYTHONPATH = "src"` e il P
 Scrivere `esci` (o `exit`, `quit`) per terminare. Senza `LMSTUDIO_MODEL` (né nel `.env` né
 nell'ambiente) il programma stampa un errore che cita la variabile e il file `.env` ed esce con
 codice 1.
+
+## Ambito e router
+Ogni domanda passa prima da un nodo **router**, che usa lo stesso modello con un prompt di sistema
+diverso e la classifica come `conversazione` (in ambito) o `fuori_ambito`:
+
+```
+START → router ─┬─ conversazione → modello ⇄ strumenti / limite → END
+                └─ fuori_ambito  → rifiuto → END
+```
+
+Le domande fuori ambito ricevono «Posso rispondere solo a domande sul laboratorio e sui suoi
+strumenti. Motivo: ...» senza raggiungere l'agente (nodo `modello`) e senza strumenti. Il router non
+decide gli strumenti: lo fa l'agente, come prima. Domanda e rifiuto restano nella cronologia.
+
+L'ambito è descritto in `ambito.txt` (testo libero, versionato) nella cartella del progetto; per usarne
+un altro impostare `AMBITO_FILE` (percorso relativo alla cartella del progetto, o assoluto). Modificare
+il file cambia l'ambito senza toccare il codice; file mancante o vuoto ferma l'avvio con
+`Errore: File dell'ambito <percorso> mancante o vuoto: ...`. In Docker il file è copiato nell'immagine:
+dopo una modifica serve `docker compose build`.
+
+Il router vede l'ultima domanda e fino a 3 messaggi precedenti fra utente e assistente (senza i
+passaggi con gli strumenti), così una domanda di seguito come «e a Londra?» resta in ambito.
+
+Righe di log (`LOG_LEVEL=INFO`, su stderr) da cercare:
+- in ambito: `router categoria=conversazione motivo=... → agente` seguita da
+  `agente: chiamata al modello`;
+- fuori ambito: `router categoria=fuori_ambito motivo=... → rifiuto` e nessuna riga `agente:`.
+
+Il router chiede la classificazione tramite uno strumento obbligatorio (`tool_choice="required"`,
+al massimo 256 token in uscita). Non usa `response_format` con schema JSON: con lo schema LM Studio
+ignora `LMSTUDIO_REASONING_EFFORT=none` e `google/gemma-4-e2b` ragiona per migliaia di token (misurati
+fino a 688 s per una sola classificazione, contro circa 3 s con lo strumento obbligatorio).
 
 ## Strumenti
 Il modello li richiede tramite tool calling; il programma li esegue davvero (registro in
@@ -382,6 +416,14 @@ cancellazioni. La prima esecuzione era fallita (il modello chiedeva il codice fa
 il grafo richiama il modello con un'istruzione (vedi «Diagnosi»).
 
 ## Diagnosi
+- **`WARNING assistente.router router non disponibile: ...`**: la classificazione non è riuscita
+  (server non raggiungibile, risposta senza tool call, argomenti non validi, limite di 256 token). La
+  domanda passa comunque all'agente come `conversazione`; il motivo segue i due punti.
+- **`WARNING assistente.router categoria non valida '<valore>': considerata conversazione`**:
+  `google/gemma-4-e2b` scrive a volte l'argomento («meteo», «inventario») al posto della categoria, ma
+  solo per domande in ambito; la domanda passa all'agente con il motivo del modello. È atteso.
+- **Domanda in ambito rifiutata** (`router categoria=fuori_ambito` per una domanda pertinente):
+  descrivere meglio quell'argomento in `ambito.txt` (o nel file di `AMBITO_FILE`) e riavviare.
 - **`Errore: archivio non avviato: archivio delle note non valido: <percorso> (...)`**: il database
   delle note non si apre o non ha lo schema atteso (file di un altro programma, percorso in una cartella
   non scrivibile, `NOTE_DB` sbagliato). Correggere `NOTE_DB` o spostare/cancellare il file (le note

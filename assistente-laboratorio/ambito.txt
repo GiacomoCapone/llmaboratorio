@@ -1,0 +1,14 @@
+L'assistente del laboratorio risponde a domande su questi argomenti:
+- ora e data correnti, anche in un altro fuso orario o in un'altra città;
+- calendario: differenza fra due date, data dopo un certo numero di giorni di calendario
+  o lavorativi, festività italiane e santo patrono;
+- calcoli aritmetici (quattro operazioni, parentesi, decimali);
+- conversioni fra unità di misura del Sistema Internazionale, temperature in K e °C;
+- meteo attuale di una località;
+- inventario del laboratorio: ricerca di strumenti e materiali, dettaglio di un articolo;
+- note del laboratorio: aggiunta, elenco ed eliminazione;
+- saluti, ringraziamenti, domande su chi è l'assistente e su che cosa sa fare.
+
+Tutto il resto è fuori ambito, per esempio: scrittura creativa (poesie, racconti),
+attualità, politica, sport, consigli personali o medici, programmazione,
+compiti scolastici non legati al laboratorio.

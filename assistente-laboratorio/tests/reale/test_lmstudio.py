@@ -22,15 +22,19 @@ from archivio.note import apri
 from assistente.grafo import build_graph
 from assistente.mcp_client import ClientArchivio
 from assistente.modello import crea_llm, verifica_modello
+from assistente.router import crea_router
 from assistente.strumenti import crea_strumenti
 
 pytestmark = pytest.mark.reale
 
 
-def esegui_domanda(domanda, caplog, note_db: Path | None = None):
+def esegui_domanda(
+    domanda, caplog, note_db: Path | None = None, categoria_attesa: str = "conversazione"
+):
     """Esegue un turno con il grafo vero; restituisce lo stato e i risultati validi degli strumenti.
 
     `note_db`: file delle note (anche già popolato); se None, un file in una cartella temporanea.
+    `categoria_attesa`: classificazione che il router deve dare alla domanda.
     """
     config = carica_config()
     verifica_modello(config)
@@ -38,8 +42,9 @@ def esegui_domanda(domanda, caplog, note_db: Path | None = None):
     with tempfile.TemporaryDirectory() as cartella, ClientArchivio(
         ambiente={"NOTE_DB": str(note_db or Path(cartella) / "note.db")}
     ) as archivio:
+        llm = crea_llm(config)
         grafo = build_graph(
-            crea_llm(config),
+            llm,
             crea_strumenti(
                 lambda: datetime.now(timezone.utc),
                 config.fuso_predefinito,
@@ -47,12 +52,14 @@ def esegui_domanda(domanda, caplog, note_db: Path | None = None):
                 esterni=archivio.strumenti(),
             ),
             config.max_passaggi,
+            crea_router(llm, config.ambito),
         )
         with caplog.at_level(logging.INFO, logger="assistente.grafo"):
             stato = grafo.invoke(
                 {"messaggi": [HumanMessage(domanda)], "passaggi": 0, "interrotto": False}
             )
     print(f"\n[{domanda!r}] turno completato in {time.perf_counter() - inizio:.1f} s")
+    assert stato["categoria"] == categoria_attesa, stato["motivo"]
     assert not stato["interrotto"], "limite di passaggi raggiunto"
     assert str(stato["messaggi"][-1].content).strip()
     validi = [
@@ -331,3 +338,12 @@ def test_osserva_domanda_di_previsione(caplog):
     stato, _ = esegui_domanda("Che tempo farà domani a Trieste?", caplog)
     print("strumenti chiamati:", [(c["name"], c["args"]) for c in chiamate_strumenti(stato)])
     print("risposta finale:", stato["messaggi"][-1].content)
+
+
+def test_router_rifiuta_fuori_ambito(caplog):
+    stato, _ = esegui_domanda(
+        "Scrivimi una poesia sul calcio", caplog, categoria_attesa="fuori_ambito"
+    )
+    assert str(stato["messaggi"][-1].content).startswith("Posso rispondere solo")
+    assert "router categoria=fuori_ambito" in caplog.text
+    assert "agente:" not in caplog.text

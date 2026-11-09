@@ -4,7 +4,7 @@ Progetto del corso «Deep Learning e LLM: costruire chatbot e agenti».
 La cartella del progetto è `assistente-laboratorio/`.
 
 ## Struttura e comandi
-- Codice in `src/assistente/` (`config`, `modello`, `strumenti/`, `grafo`, `mcp_client`, `cli`); test in `tests/`,
+- Codice in `src/assistente/` (`config`, `modello`, `strumenti/`, `router`, `grafo`, `mcp_client`, `cli`); test in `tests/`,
   prove con LM Studio in `tests/reale/`; specifica e piano in `docs/superpowers/`.
 - `strumenti/` è un pacchetto: un modulo per strumento e il registro (`crea_strumenti`) in
   `__init__.py`; il grafo esegue gli strumenti per nome senza conoscerli.
@@ -24,6 +24,8 @@ La cartella del progetto è `assistente-laboratorio/`.
 ## Obiettivo
 Un'applicazione da terminale in Python che conversa con un modello locale e:
 - organizza il flusso in un grafo LangGraph esplicito (stato, nodi, instradamento riconoscibili);
+- un router all'inizio del turno rifiuta le domande fuori dall'ambito descritto in `ambito.txt`
+  (`AMBITO_FILE`), senza raggiungere l'agente;
 - usa un modello servito da LM Studio, che resta sul computer host;
 - conserva la cronologia della conversazione per la durata della sessione (nessuna persistenza);
 - offre uno strumento orologio con fuso orario esplicito, richiesto dal modello tramite tool calling
@@ -37,8 +39,7 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
 - si avvia anche con Docker Compose.
 
 ## Confini
-- Implementare solo i requisiti concordati. Altri strumenti, MCP, workflow e RAG arriveranno
-  nelle lezioni successive: non anticiparli.
+- Implementare solo i requisiti concordati.
 - Niente interfacce grafiche, servizi cloud o framework non concordati.
 - Lavorare solo dentro `assistente-laboratorio/`. La repository contiene altre lezioni:
   non leggerle per copiarne il codice e non modificarle.

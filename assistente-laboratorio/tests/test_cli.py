@@ -4,12 +4,23 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from assistente.cli import ciclo, esegui_turno, main
-from assistente.grafo import MESSAGGIO_LIMITE, build_graph
+from assistente.config import carica_config
+from assistente.grafo import MESSAGGIO_LIMITE, MESSAGGIO_RIFIUTO, build_graph
 from assistente.mcp_client import ErroreArchivio
 from assistente.strumenti import Strumento, crea_strumenti
-from finti import LlmFinto, richiesta_ora
+from finti import LlmFinto, RouterFinto, richiesta_ora
 
 ADESSO = lambda: datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)  # noqa: E731
+
+
+def crea_grafo(llm, max_passaggi, router=None):
+    """Grafo con gli strumenti veri e un router simulato (in ambito, se non indicato)."""
+    return build_graph(
+        llm,
+        crea_strumenti(ADESSO, "Europe/Rome"),
+        max_passaggi,
+        router or RouterFinto("conversazione"),
+    )
 
 
 def unisci_testo(messaggi):
@@ -42,7 +53,7 @@ def leggi_da(righe):
 
 def test_la_seconda_domanda_vede_la_prima():
     llm = LlmFinto([AIMessage("Risposta uno"), AIMessage("Risposta due")])
-    grafo = build_graph(llm, crea_strumenti(ADESSO, "Europe/Rome"), 5)
+    grafo = crea_grafo(llm, 5)
     esito1 = esegui_turno(grafo, [], "Prima domanda")
     esito2 = esegui_turno(grafo, esito1.cronologia, "Seconda domanda")
     visto = unisci_testo(llm.chiamate[1])
@@ -54,14 +65,14 @@ def test_la_seconda_domanda_vede_la_prima():
 
 def test_turno_interrotto_non_entra_in_cronologia():
     llm = LlmFinto([richiesta_ora("Europe/Rome")], ripeti_ultima=True)
-    grafo = build_graph(llm, crea_strumenti(ADESSO, "Europe/Rome"), 1)
+    grafo = crea_grafo(llm, 1)
     esito = esegui_turno(grafo, [], "Che ore sono?")
     assert esito.interrotto is True
     assert esito.testo == MESSAGGIO_LIMITE
     assert esito.cronologia == []
 
     llm2 = LlmFinto([AIMessage("Ok")])
-    grafo2 = build_graph(llm2, crea_strumenti(ADESSO, "Europe/Rome"), 1)
+    grafo2 = crea_grafo(llm2, 1)
     esito2 = esegui_turno(grafo2, esito.cronologia, "Ciao")
     assert esito2.testo == "Ok"
     assert tool_calls_orfani(llm2.chiamate[0]) == []
@@ -78,7 +89,7 @@ class LlmErroreIniziale(LlmFinto):
 
 def test_errore_del_modello_non_chiude_la_sessione():
     llm = LlmErroreIniziale([AIMessage("Risposta valida")])
-    grafo = build_graph(llm, crea_strumenti(ADESSO, "Europe/Rome"), 5)
+    grafo = crea_grafo(llm, 5)
     uscite = []
     ciclo(grafo, leggi_da(["Prima", "Seconda", "esci"]), uscite.append)
     assert any(u.startswith("Errore:") for u in uscite)
@@ -88,7 +99,7 @@ def test_errore_del_modello_non_chiude_la_sessione():
 
 def test_ciclo_segnala_turno_interrotto():
     llm = LlmFinto([richiesta_ora("Europe/Rome")], ripeti_ultima=True)
-    grafo = build_graph(llm, crea_strumenti(ADESSO, "Europe/Rome"), 1)
+    grafo = crea_grafo(llm, 1)
     uscite = []
     ciclo(grafo, leggi_da(["Ora?", "quit"]), uscite.append)
     assert any(MESSAGGIO_LIMITE in u for u in uscite)
@@ -96,7 +107,7 @@ def test_ciclo_segnala_turno_interrotto():
 
 def test_risposta_vuota_non_manda_in_crash():
     llm = LlmFinto([AIMessage("")])
-    grafo = build_graph(llm, crea_strumenti(ADESSO, "Europe/Rome"), 5)
+    grafo = crea_grafo(llm, 5)
     uscite = []
     ciclo(grafo, leggi_da(["Ciao", "exit"]), uscite.append)
     assert uscite and all(u.strip() for u in uscite)
@@ -105,7 +116,7 @@ def test_risposta_vuota_non_manda_in_crash():
 def test_input_vuoto_e_uscita():
     for finale in ["ESCI", EOFError(), KeyboardInterrupt()]:
         llm = LlmFinto([])
-        grafo = build_graph(llm, crea_strumenti(ADESSO, "Europe/Rome"), 5)
+        grafo = crea_grafo(llm, 5)
         uscite = []
         ciclo(grafo, leggi_da(["", "   ", finale]), uscite.append)
         assert llm.chiamate == []
@@ -121,7 +132,7 @@ class LlmCtrlCIniziale(LlmFinto):
 
 def test_ctrl_c_durante_il_turno_annulla_solo_il_turno():
     llm = LlmCtrlCIniziale([AIMessage("Risposta valida")])
-    grafo = build_graph(llm, crea_strumenti(ADESSO, "Europe/Rome"), 5)
+    grafo = crea_grafo(llm, 5)
     uscite = []
     ciclo(grafo, leggi_da(["Prima", "Seconda", "esci"]), uscite.append)
     assert any("annullato" in u for u in uscite)
@@ -173,9 +184,10 @@ def test_main_passa_gli_strumenti_dell_archivio(monkeypatch):
     monkeypatch.setattr("assistente.cli.ClientArchivio", lambda **kwargs: finto)
     monkeypatch.setattr("assistente.cli.verifica_modello", lambda config: None)
     monkeypatch.setattr("assistente.cli.crea_llm", lambda config: None)
+    monkeypatch.setattr("assistente.cli.crea_router", lambda llm, ambito: None)
     nomi = []
 
-    def grafo_finto(llm, strumenti, max_passaggi):
+    def grafo_finto(llm, strumenti, max_passaggi, router):
         nomi.extend(strumenti)
         raise KeyboardInterrupt
 
@@ -228,8 +240,46 @@ def test_main_configurazione_mancante(monkeypatch, capsys):
 def test_bom_di_powershell_ignorato():
     # PowerShell antepone \ufeff alla prima riga inviata con una pipe.
     llm = LlmFinto([AIMessage("Ciao!")])
-    grafo = build_graph(llm, crea_strumenti(ADESSO, "Europe/Rome"), 5)
+    grafo = crea_grafo(llm, 5)
     uscite = []
     ciclo(grafo, leggi_da(["\ufeffciao", "\ufeffesci", "non letta"]), uscite.append)
     assert uscite == ["Ciao!"]
     assert unisci_testo(llm.chiamate[0]).strip() == "ciao"
+
+
+def test_turno_rifiutato_resta_in_cronologia():
+    llm = LlmFinto([AIMessage("Ciao!")])
+    router = RouterFinto(["fuori_ambito", "conversazione"], "poesia")
+    grafo = crea_grafo(llm, 5, router)
+    primo = esegui_turno(grafo, [], "Scrivi una poesia")
+    assert primo.interrotto is False
+    assert [m.type for m in primo.cronologia] == ["human", "ai"]
+    assert primo.cronologia[-1].content == MESSAGGIO_RIFIUTO.format(motivo="poesia")
+    secondo = esegui_turno(grafo, primo.cronologia, "Ciao")
+    assert secondo.testo == "Ciao!"
+    assert MESSAGGIO_RIFIUTO.format(motivo="poesia") in unisci_testo(llm.chiamate[0])
+
+
+def test_main_passa_il_router(monkeypatch):
+    imposta_env(monkeypatch)
+    monkeypatch.setattr("assistente.cli.ClientArchivio", lambda **kwargs: ArchivioFinto())
+    monkeypatch.setattr("assistente.cli.verifica_modello", lambda config: None)
+    llm_finto = object()
+    monkeypatch.setattr("assistente.cli.crea_llm", lambda config: llm_finto)
+    router_finto = object()
+    ricevuti = {}
+
+    def crea_router_finto(llm, ambito):
+        ricevuti.update(llm=llm, ambito=ambito)
+        return router_finto
+
+    def grafo_finto(llm, strumenti, max_passaggi, router):
+        ricevuti["router"] = router
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("assistente.cli.crea_router", crea_router_finto)
+    monkeypatch.setattr("assistente.cli.build_graph", grafo_finto)
+    assert main() == 130
+    assert ricevuti["llm"] is llm_finto
+    assert ricevuti["ambito"] == carica_config().ambito
+    assert ricevuti["router"] is router_finto

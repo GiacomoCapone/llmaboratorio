@@ -2,6 +2,7 @@
 
 from langchain_core.messages import AIMessage
 
+from assistente.router import Classificazione
 from assistente.strumenti.orologio import NOME_ORA_CORRENTE
 
 
@@ -11,11 +12,13 @@ class LlmFinto:
         self.ripeti_ultima = ripeti_ultima
         self.chiamate: list[list] = []
         self.strumenti: list = []
+        self.opzioni_strumenti: dict = {}  # argomenti in più passati a bind_tools
         self.con_strumenti: list[bool] = []  # per invocazione: con o senza strumenti
         self._indice = 0
 
-    def bind_tools(self, tools) -> "_LlmLegato":
+    def bind_tools(self, tools, **opzioni) -> "_LlmLegato":
         self.strumenti = list(tools)
+        self.opzioni_strumenti = opzioni
         return _LlmLegato(self)
 
     def invoke(self, messaggi) -> AIMessage:
@@ -44,6 +47,20 @@ class _LlmLegato:
 
     def invoke(self, messaggi) -> AIMessage:
         return self.base._rispondi(messaggi, con_strumenti=True)
+
+
+class RouterFinto:
+    """Router simulato: restituisce le categorie indicate (l'ultima si ripete)."""
+
+    def __init__(self, categoria: str | list[str], motivo: str = "motivo di prova"):
+        self.categorie = [categoria] if isinstance(categoria, str) else list(categoria)
+        self.motivo = motivo
+        self.chiamate: list[list] = []
+
+    def __call__(self, messaggi) -> Classificazione:
+        indice = min(len(self.chiamate), len(self.categorie) - 1)
+        self.chiamate.append(list(messaggi))
+        return Classificazione(categoria=self.categorie[indice], motivo=self.motivo)
 
 
 def richiesta(nome: str, args, id: str = "c1") -> AIMessage:

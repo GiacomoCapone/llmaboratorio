@@ -1,12 +1,14 @@
 """Grafo LangGraph dell'assistente: stato, nodi, instradamento."""
 
 import logging
+from collections.abc import Callable
 from typing import Annotated, Literal, TypedDict
 
 from langchain_core.messages import AIMessage, AnyMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
+from assistente.router import Classificazione
 from assistente.strumenti import Strumento
 
 logger = logging.getLogger("assistente.grafo")
@@ -16,12 +18,22 @@ MESSAGGIO_LIMITE = (
     "la richiesta è stata interrotta senza una risposta finale."
 )
 ISTRUZIONE_RISPOSTA = "Rispondi all'utente riferendo il risultato degli strumenti."
+MESSAGGIO_RIFIUTO = (
+    "Posso rispondere solo a domande sul laboratorio e sui suoi strumenti. Motivo: {motivo}"
+)
 
 
 class Stato(TypedDict):
     messaggi: Annotated[list[AnyMessage], add_messages]
     passaggi: int
     interrotto: bool
+    categoria: str  # scritti dal nodo router
+    motivo: str
+
+
+def instrada_dopo_router(stato: Stato) -> Literal["agente", "rifiuto"]:
+    """Le domande fuori ambito vanno al rifiuto, tutte le altre all'agente."""
+    return "rifiuto" if stato["categoria"] == "fuori_ambito" else "agente"
 
 
 def instrada_dopo_modello(
@@ -60,11 +72,28 @@ def _esegui_strumento(strumenti: dict[str, Strumento], nome, args) -> str:
         return f"Errore: errore interno dello strumento '{nome}'."
 
 
-def build_graph(llm, strumenti: dict[str, Strumento], max_passaggi: int):
-    """Costruisce e compila il grafo modello / strumenti / limite."""
+def build_graph(
+    llm,
+    strumenti: dict[str, Strumento],
+    max_passaggi: int,
+    router: Callable[[list[AnyMessage]], Classificazione],
+):
+    """Costruisce e compila il grafo router / rifiuto / modello / strumenti / limite."""
     llm_con_strumenti = llm.bind_tools([s.definizione for s in strumenti.values()])
 
+    def nodo_router(stato: Stato) -> dict:
+        esito = router(stato["messaggi"])
+        destinazione = instrada_dopo_router({"categoria": esito.categoria})
+        logger.info(
+            "router categoria=%s motivo=%s → %s", esito.categoria, esito.motivo, destinazione
+        )
+        return {"categoria": esito.categoria, "motivo": esito.motivo}
+
+    def rifiuto(stato: Stato) -> dict:
+        return {"messaggi": [AIMessage(MESSAGGIO_RIFIUTO.format(motivo=stato["motivo"]))]}
+
     def modello(stato: Stato) -> dict:
+        logger.info("agente: chiamata al modello")
         risposta = llm_con_strumenti.invoke(stato["messaggi"])
         # Con più strumenti collegati alcuni modelli piccoli (gemma-4-e2b) rispondono ai
         # risultati con un testo vuoto: si richiama una volta il modello senza strumenti, con in
@@ -114,10 +143,16 @@ def build_graph(llm, strumenti: dict[str, Strumento], max_passaggi: int):
         return {"messaggi": [AIMessage(MESSAGGIO_LIMITE)], "interrotto": True}
 
     grafo = StateGraph(Stato)
+    grafo.add_node("router", nodo_router)
+    grafo.add_node("rifiuto", rifiuto)
     grafo.add_node("modello", modello)
     grafo.add_node("strumenti", esegui_strumenti)
     grafo.add_node("limite", limite)
-    grafo.add_edge(START, "modello")
+    grafo.add_edge(START, "router")
+    grafo.add_conditional_edges(
+        "router", instrada_dopo_router, {"agente": "modello", "rifiuto": "rifiuto"}
+    )
+    grafo.add_edge("rifiuto", END)
     grafo.add_conditional_edges(
         "modello",
         lambda stato: instrada_dopo_modello(stato, max_passaggi),
@@ -125,4 +160,4 @@ def build_graph(llm, strumenti: dict[str, Strumento], max_passaggi: int):
     )
     grafo.add_edge("strumenti", "modello")
     grafo.add_edge("limite", END)
-    return grafo.compile().with_config(recursion_limit=max_passaggi * 2 + 10)
+    return grafo.compile().with_config(recursion_limit=max_passaggi * 2 + 12)
