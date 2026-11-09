@@ -115,15 +115,15 @@ Il modello li richiede tramite tool calling; il programma li esegue davvero (reg
 - **Meteo** (`meteo_attuale`): condizioni attuali di una località da Open-Meteo; **richiede Internet**.
   Il nome è cercato con il geocoding di Open-Meteo e si usa il primo risultato, mostrato nella riga
   `Luogo:` (controllare che sia la località voluta). Niente previsioni: solo l'ora della rilevazione.
-  Esempio (Pordenone, 2026-11-09):
+  Esempio (uscita reale di `esegui_meteo` per Pordenone, 2026-11-09):
   ```
   Luogo: Pordenone, Friuli Venezia Giulia, Italia
-  Rilevazione: 2026-11-09 09:15 (ora locale, Europe/Rome)
+  Rilevazione: 2026-11-09 09:30 (ora locale, Europe/Rome)
   Cielo: coperto
-  Temperatura: 6,3 °C (percepita 4,9 °C)
-  Umidità: 89 %
+  Temperatura: 7,0 °C (percepita 5,6 °C)
+  Umidità: 87 %
   Precipitazioni: 0,0 mm
-  Vento: 1,1 km/h da est
+  Vento: 1,6 km/h da sud-est
   ```
   Errori in forma `Errore: ...`.
 
@@ -138,7 +138,7 @@ Prova con Open-Meteo vero (Internet, senza modello; esclusa di default, marker `
 ```powershell
 .venv\Scripts\python.exe -m pytest -m rete -v
 ```
-Esito del 2026-11-09: 2 passati.
+Esito del 2026-11-09, eseguito da PowerShell: 2 passati.
 
 ## Docker: verificato e da verificare
 Su Python 3.14 sono verificati: l'installazione di `requirements.txt` in un `.venv` locale, i test
