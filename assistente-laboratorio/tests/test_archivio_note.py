@@ -1,7 +1,8 @@
-"""Logica pura delle note: apertura del database e aggiunta."""
+"""Logica pura delle note: apertura, aggiunta, elenco, eliminazione."""
 
+import logging
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -135,3 +136,114 @@ def test_cartella_non_creabile(tmp_path, inventario):
     (tmp_path / "f").write_text("x")
     with pytest.raises(ErroreNote):
         apri(tmp_path / "f" / "note.db", inventario, adesso)
+
+
+def orologio_che_avanza():
+    """Un istante diverso (un minuto in più) a ogni chiamata."""
+    istanti = iter(adesso() + timedelta(minutes=n) for n in range(100))
+    return lambda: next(istanti)
+
+
+@pytest.fixture
+def note_datate(tmp_path, inventario):
+    return apri(tmp_path / "note.db", inventario, orologio_che_avanza())
+
+
+def test_elenco_dalla_piu_recente(note_datate):
+    note_datate.aggiungi("primo", "MIS-001")
+    note_datate.aggiungi("secondo", None)
+    note_datate.aggiungi("terzo", "SAL-002")
+    assert note_datate.elenca(None) == (
+        "Trovate 3 note:\n"
+        "- 3 — 2026-11-09 14:34 — SAL-002 — terzo\n"
+        "- 2 — 2026-11-09 14:33 — secondo\n"
+        "- 1 — 2026-11-09 14:32 — MIS-001 — primo"
+    )
+
+
+def test_elenco_una_nota(note):
+    note.aggiungi("unica", None)
+    assert note.elenca(None).splitlines()[0] == "Trovata 1 nota:"
+
+
+def test_elenco_vuoto(note):
+    assert note.elenca(None) == "Nessuna nota."
+    assert note.elenca("mis-001") == "Nessuna nota per l'articolo MIS-001."
+
+
+@pytest.mark.parametrize("codice", ["MIS-001", " mis-001 "])
+def test_elenco_filtrato(note, codice):
+    note.aggiungi("del multimetro", "MIS-001")
+    note.aggiungi("del saldatore", "SAL-002")
+    note.aggiungi("generica", None)
+    risultato = note.elenca(codice)
+    assert risultato.startswith("Trovata 1 nota:")
+    assert "del multimetro" in risultato
+    assert "del saldatore" not in risultato
+    assert "generica" not in risultato
+
+
+def test_elenco_codice_sconosciuto(note):
+    assert note.elenca("XYZ-9") == "Errore: nessun articolo con codice 'XYZ-9'."
+    assert (
+        note.elenca("a" * 101) == "Errore: testo troppo lungo (massimo 100 caratteri)."
+    )
+
+
+def test_elenco_limite(note):
+    for n in range(23):
+        note.aggiungi(f"nota {n + 1}", None)
+    righe = note.elenca(None).splitlines()
+    assert righe[0] == "Trovate 23 note:"
+    assert len(righe) == 1 + 20 + 1
+    assert righe[1].startswith("- 23 — ")
+    assert righe[20].startswith("- 4 — ")
+    assert righe[-1] == "(altre 3 note più vecchie non mostrate)"
+
+
+def test_elimina(note):
+    note.aggiungi("display difettoso", "MIS-001")
+    assert (
+        note.elimina(1)
+        == "Nota 1 eliminata: «display difettoso» (MIS-001, 2026-11-09 14:32)."
+    )
+    assert note.elenca(None) == "Nessuna nota."
+    note.aggiungi("senza codice", None)
+    assert note.elimina(2) == "Nota 2 eliminata: «senza codice» (2026-11-09 14:32)."
+
+
+def test_elimina_inesistente(note):
+    assert note.elimina(12) == "Errore: nessuna nota con numero 12."
+    note.aggiungi("prova", None)
+    note.elimina(1)
+    assert note.elimina(1) == "Errore: nessuna nota con numero 1."
+
+
+@pytest.mark.parametrize("numero", [0, -1])
+def test_elimina_numero_non_positivo(note, numero):
+    assert note.elimina(numero) == "Errore: il numero della nota deve essere un intero positivo."
+
+
+def test_numero_non_riusato(note):
+    note.aggiungi("uno", None)
+    note.aggiungi("due", None)
+    note.elimina(2)
+    assert note.aggiungi("tre", None).startswith("Nota 3 salvata")
+
+
+@pytest.mark.parametrize(
+    "operazione",
+    [
+        lambda n: n.aggiungi("prova", None),
+        lambda n: n.elenca(None),
+        lambda n: n.elimina(1),
+    ],
+    ids=["aggiungi", "elenca", "elimina"],
+)
+def test_errore_sqlite_in_esercizio(tmp_path, note, operazione, caplog):
+    (tmp_path / "note.db").write_bytes(b"non sono un database" * 100)
+    with caplog.at_level(logging.WARNING, logger="archivio.note"):
+        assert operazione(note) == "Errore: archivio delle note non disponibile."
+    assert any(
+        r.name == "archivio.note" and r.levelno == logging.WARNING for r in caplog.records
+    )
