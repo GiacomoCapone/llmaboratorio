@@ -274,6 +274,19 @@ def test_il_modello_aggiunge_una_nota(caplog, tmp_path):
     )
 
 
+def test_il_modello_aggiunge_una_nota_senza_codice(caplog, tmp_path):
+    stato, _ = esegui_domanda("Annota che il saldatore va pulito", caplog, tmp_path / "note.db")
+    chiamate = chiamate_strumenti(stato)
+    risultati = risultati_strumenti(stato)
+    print("chiamate note:", [(c["name"], c["args"]) for c in chiamate])
+    assert any(
+        c["name"] == "aggiungi_nota" and not c["args"].get("codice") for c in chiamate
+    ), f"aggiungi_nota non chiamato senza codice: {chiamate}"
+    assert any(r.startswith("Nota ") and "salvata" in r for r in risultati), (
+        f"nessun ToolMessage 'Nota ... salvata': {risultati} (chiamate: {chiamate})"
+    )
+
+
 def test_il_modello_elenca_le_note(caplog, tmp_path):
     note_db = tmp_path / "note.db"
     prepara_nota(note_db, "Batteria scarica", "MIS-001")

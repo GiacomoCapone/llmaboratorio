@@ -33,22 +33,27 @@ DESCRIZIONE_TESTO = (
 DESCRIZIONE_CATEGORIA = "Nome esatto di una categoria, per esempio strumenti di misura."
 DESCRIZIONE_CODICE = "Codice dell'articolo, per esempio MIS-001."
 DESCRIZIONE_AGGIUNGI = (
-    "Salva una nota del laboratorio (promemoria, guasto, osservazione), facoltativamente legata al codice "
-    "di un articolo dell'inventario, per esempio MIS-003. Chiamalo SEMPRE quando l'utente chiede di "
-    "annotare, ricordare o segnare qualcosa."
+    "Salva una nota del laboratorio (promemoria, guasto, osservazione). Chiamalo SEMPRE quando l'utente "
+    "chiede di annotare, ricordare o segnare qualcosa, senza chiedere altro. Il codice di un articolo "
+    "dell'inventario (per esempio MIS-003) va indicato solo se l'utente lo scrive; altrimenti la nota si "
+    "salva senza codice."
 )
 DESCRIZIONE_ELENCA = (
-    "Elenca le note del laboratorio, dalla più recente, con numero, data, codice dell'articolo e testo; "
-    "con un codice mostra solo le note di quell'articolo. Chiamalo quando l'utente chiede le note o i "
-    "promemoria salvati."
+    "Elenca le note del laboratorio, dalla più recente, con numero, data, codice dell'articolo e testo. "
+    "Chiamalo SEMPRE quando l'utente chiede le note o i promemoria salvati, senza chiedere altro: senza "
+    "codice mostra tutte le note."
 )
 DESCRIZIONE_ELIMINA = (
     "Elimina definitivamente una nota del laboratorio dato il suo numero, visibile con elenca_note. Usalo "
     "solo quando l'utente chiede esplicitamente di eliminare una nota."
 )
 DESCRIZIONE_TESTO_NOTA = "Testo della nota, per esempio display difettoso."
-DESCRIZIONE_CODICE_NOTA = "Codice dell'articolo a cui si riferisce la nota, per esempio MIS-003."
-DESCRIZIONE_CODICE_ELENCA = "Codice di un articolo per vedere solo le sue note, per esempio MIS-003."
+DESCRIZIONE_CODICE_NOTA = (
+    "Facoltativo: codice dell'articolo, solo se l'utente lo indica, per esempio MIS-003."
+)
+DESCRIZIONE_CODICE_ELENCA = (
+    "Facoltativo: codice di un articolo, solo se l'utente lo indica, per vedere solo le sue note."
+)
 DESCRIZIONE_NUMERO = "Numero della nota da eliminare, per esempio 3."
 
 
