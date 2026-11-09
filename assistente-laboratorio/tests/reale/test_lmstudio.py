@@ -15,7 +15,9 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from assistente.config import carica_config
+from archivio.inventario import PERCORSO_INVENTARIO, carica
 from assistente.grafo import build_graph
+from assistente.mcp_client import ClientArchivio
 from assistente.modello import crea_llm, verifica_modello
 from assistente.strumenti import crea_strumenti
 
@@ -26,18 +28,22 @@ def esegui_domanda(domanda, caplog):
     """Esegue un turno con il grafo vero; restituisce lo stato e i risultati validi degli strumenti."""
     config = carica_config()
     verifica_modello(config)
-    grafo = build_graph(
-        crea_llm(config),
-        crea_strumenti(
-            lambda: datetime.now(timezone.utc), config.fuso_predefinito, config.citta_patrono
-        ),
-        config.max_passaggi,
-    )
     inizio = time.perf_counter()
-    with caplog.at_level(logging.INFO, logger="assistente.grafo"):
-        stato = grafo.invoke(
-            {"messaggi": [HumanMessage(domanda)], "passaggi": 0, "interrotto": False}
+    with ClientArchivio() as archivio:
+        grafo = build_graph(
+            crea_llm(config),
+            crea_strumenti(
+                lambda: datetime.now(timezone.utc),
+                config.fuso_predefinito,
+                config.citta_patrono,
+                esterni=archivio.strumenti(),
+            ),
+            config.max_passaggi,
         )
+        with caplog.at_level(logging.INFO, logger="assistente.grafo"):
+            stato = grafo.invoke(
+                {"messaggi": [HumanMessage(domanda)], "passaggi": 0, "interrotto": False}
+            )
     print(f"\n[{domanda!r}] turno completato in {time.perf_counter() - inizio:.1f} s")
     assert not stato["interrotto"], "limite di passaggi raggiunto"
     assert str(stato["messaggi"][-1].content).strip()
@@ -178,6 +184,62 @@ def test_il_modello_usa_il_meteo(caplog):
         f"risposta senza la temperatura {t} (cercati {sorted(candidati)} a confini di cifra): "
         f"{finale!r}"
     )
+
+
+def risultati_strumenti(stato):
+    return [str(m.content) for m in stato["messaggi"] if isinstance(m, ToolMessage)]
+
+
+def test_il_modello_usa_il_catalogo_per_cercare(caplog):
+    stato, _ = esegui_domanda("Abbiamo dei multimetri? Dove sono?", caplog)
+    chiamate = chiamate_strumenti(stato)
+    risultati = risultati_strumenti(stato)
+    assert any(c["name"] == "cerca_inventario" for c in chiamate), (
+        f"cerca_inventario non chiamato: {chiamate}"
+    )
+    assert any(r.startswith("Trovat") for r in risultati), (
+        f"nessun ToolMessage che inizia con 'Trovat': {risultati}"
+    )
+    assert not any(r.startswith("Errore:") for r in risultati), risultati
+    collocazione = next(
+        a.collocazione for a in carica(PERCORSO_INVENTARIO).articoli if a.codice == "MIS-001"
+    )
+    finale = str(stato["messaggi"][-1].content)
+    assert collocazione.lower() in finale.lower(), (
+        f"risposta senza la collocazione {collocazione!r}: {finale!r} (chiamate: {chiamate})"
+    )
+
+
+def test_il_modello_usa_il_dettaglio(caplog):
+    stato, _ = esegui_domanda("Dammi i dettagli dell'articolo MIS-001", caplog)
+    chiamate = chiamate_strumenti(stato)
+    risultati = risultati_strumenti(stato)
+    assert any(
+        c["name"] == "dettaglio_articolo"
+        and str(c["args"].get("codice", "")).lower() == "mis-001"
+        for c in chiamate
+    ), f"dettaglio_articolo non chiamato con MIS-001: {chiamate}"
+    assert any(r.startswith("Codice: MIS-001") for r in risultati), (
+        f"nessun ToolMessage che inizia con 'Codice: MIS-001': {risultati}"
+    )
+
+
+def test_il_modello_cerca_per_categoria(caplog):
+    stato, _ = esegui_domanda("Che cosa c'è fra gli strumenti di misura?", caplog)
+    chiamate = chiamate_strumenti(stato)
+    risultati = risultati_strumenti(stato)
+    assert any(
+        c["name"] == "cerca_inventario"
+        and (
+            "misura" in str(c["args"].get("categoria", "")).lower()
+            or "misura" in str(c["args"].get("testo", "")).lower()
+        )
+        for c in chiamate
+    ), f"cerca_inventario senza 'misura' in categoria o testo: {chiamate}"
+    assert any(r.startswith("Trovat") for r in risultati), (
+        f"nessun ToolMessage che inizia con 'Trovat': {risultati} (chiamate: {chiamate})"
+    )
+    print("chiamate catalogo:", [(c["name"], c["args"]) for c in chiamate])
 
 
 def test_osserva_domanda_di_previsione(caplog):
