@@ -8,7 +8,9 @@ from assistente.strumenti.calcolatrice import DEFINIZIONE_CALCOLA, esegui_calcol
 from assistente.strumenti.calendario import definizione_calendario, esegui_calendario
 from assistente.strumenti.convertitore import DEFINIZIONE_CONVERTI, esegui_converti
 from assistente.strumenti.festivita import carica_festivita
+from assistente.strumenti.meteo import DEFINIZIONE_METEO, esegui_meteo
 from assistente.strumenti.orologio import definizione_ora_corrente, esegui_ora_corrente
+from assistente.strumenti.rete import scarica_json
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,7 @@ def crea_strumenti(
     adesso: Callable[[], datetime],
     fuso_predefinito: str,
     citta_patrono: str | None = None,
+    scarica: Callable[[str, dict], dict] = scarica_json,
 ) -> dict[str, Strumento]:
     """Costruisce il registro, legando a ciascuno strumento le sue dipendenze."""
     festivita = carica_festivita(citta_patrono)
@@ -49,5 +52,6 @@ def crea_strumenti(
             definizione_calendario(festivita.citta),
             lambda args: esegui_calendario(args, festivita),
         ),
+        Strumento(DEFINIZIONE_METEO, lambda args: esegui_meteo(args, scarica)),
     ]
     return registro(strumenti)

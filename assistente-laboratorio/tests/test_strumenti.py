@@ -3,9 +3,9 @@ from datetime import datetime, timezone
 import pytest
 
 from assistente.config import ErroreConfigurazione
-
 from assistente.strumenti import Strumento, crea_strumenti, registro
 from assistente.strumenti.calcolatrice import DEFINIZIONE_CALCOLA, esegui_calcola
+from assistente.strumenti.rete import ErroreRete
 
 ADESSO = lambda: datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)  # noqa: E731
 
@@ -16,6 +16,7 @@ def test_registro_contiene_gli_strumenti():
         "calcola",
         "converti_unita",
         "calendario",
+        "meteo_attuale",
     ]
 
 
@@ -45,3 +46,15 @@ def test_registro_cita_il_patrono():
         "function"
     ]["description"]
     assert "patrono di Pordenone" in descrizione
+
+
+def test_registro_usa_scarica_iniettata():
+    chiamate = []
+
+    def finta(url, parametri):
+        chiamate.append((url, parametri))
+        raise ErroreRete("prova.")
+
+    meteo = crea_strumenti(ADESSO, "Europe/Rome", scarica=finta)["meteo_attuale"]
+    assert meteo.esegui({"localita": "Pordenone"}) == "Errore: prova."
+    assert len(chiamate) == 1
