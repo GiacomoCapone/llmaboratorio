@@ -3,14 +3,18 @@
 import asyncio
 import logging
 import signal
+import sqlite3
 import sys
 import time
+from contextlib import closing
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
 import archivio.__main__ as main_archivio
 from assistente import mcp_client
+from archivio.note import CARTELLA_PROGETTO, PERCORSO_NOTE_PREDEFINITO
 from assistente.mcp_client import ClientArchivio, ErroreArchivio
 
 DESCRIZIONE_CERCA = (
@@ -28,11 +32,34 @@ DESCRIZIONE_TESTO = (
 )
 DESCRIZIONE_CATEGORIA = "Nome esatto di una categoria, per esempio strumenti di misura."
 DESCRIZIONE_CODICE = "Codice dell'articolo, per esempio MIS-001."
+DESCRIZIONE_AGGIUNGI = (
+    "Salva una nota del laboratorio (promemoria, guasto, osservazione), facoltativamente legata al codice "
+    "di un articolo dell'inventario, per esempio MIS-003. Chiamalo SEMPRE quando l'utente chiede di "
+    "annotare, ricordare o segnare qualcosa."
+)
+DESCRIZIONE_ELENCA = (
+    "Elenca le note del laboratorio, dalla più recente, con numero, data, codice dell'articolo e testo; "
+    "con un codice mostra solo le note di quell'articolo. Chiamalo quando l'utente chiede le note o i "
+    "promemoria salvati."
+)
+DESCRIZIONE_ELIMINA = (
+    "Elimina definitivamente una nota del laboratorio dato il suo numero, visibile con elenca_note. Usalo "
+    "solo quando l'utente chiede esplicitamente di eliminare una nota."
+)
+DESCRIZIONE_TESTO_NOTA = "Testo della nota, per esempio display difettoso."
+DESCRIZIONE_CODICE_NOTA = "Codice dell'articolo a cui si riferisce la nota, per esempio MIS-003."
+DESCRIZIONE_CODICE_ELENCA = "Codice di un articolo per vedere solo le sue note, per esempio MIS-003."
+DESCRIZIONE_NUMERO = "Numero della nota da eliminare, per esempio 3."
 
 
 @pytest.fixture(scope="module")
-def client():
-    with ClientArchivio() as aperto:
+def file_note(tmp_path_factory):
+    return tmp_path_factory.mktemp("note") / "note.db"
+
+
+@pytest.fixture(scope="module")
+def client(file_note):
+    with ClientArchivio(ambiente={"NOTE_DB": str(file_note)}) as aperto:
         yield aperto
 
 
@@ -43,11 +70,17 @@ def strumenti(client):
 
 def test_definizioni(client):
     definizioni = [s.definizione for s in client.strumenti()]
-    assert [d["function"]["name"] for d in definizioni] == ["cerca_inventario", "dettaglio_articolo"]
+    assert [d["function"]["name"] for d in definizioni] == [
+        "cerca_inventario",
+        "dettaglio_articolo",
+        "aggiungi_nota",
+        "elenca_note",
+        "elimina_nota",
+    ]
     for d in definizioni:
         assert d["type"] == "function"
         assert {"name", "description", "parameters"} <= d["function"].keys()
-    cerca, dettaglio = (d["function"] for d in definizioni)
+    cerca, dettaglio, aggiungi, elenca, elimina = (d["function"] for d in definizioni)
     assert cerca["description"] == DESCRIZIONE_CERCA
     assert dettaglio["description"] == DESCRIZIONE_DETTAGLIO
     proprieta = cerca["parameters"]["properties"]
@@ -56,6 +89,50 @@ def test_definizioni(client):
     assert "required" not in cerca["parameters"]
     assert dettaglio["parameters"]["properties"]["codice"]["description"] == DESCRIZIONE_CODICE
     assert dettaglio["parameters"]["required"] == ["codice"]
+    assert aggiungi["description"] == DESCRIZIONE_AGGIUNGI
+    assert elenca["description"] == DESCRIZIONE_ELENCA
+    assert elimina["description"] == DESCRIZIONE_ELIMINA
+    assert aggiungi["parameters"]["properties"]["testo"]["description"] == DESCRIZIONE_TESTO_NOTA
+    assert aggiungi["parameters"]["properties"]["codice"]["description"] == DESCRIZIONE_CODICE_NOTA
+    assert elenca["parameters"]["properties"]["codice"]["description"] == DESCRIZIONE_CODICE_ELENCA
+    assert elimina["parameters"]["properties"]["numero"]["description"] == DESCRIZIONE_NUMERO
+    assert aggiungi["parameters"]["required"] == ["testo"]
+    assert "required" not in elenca["parameters"]
+    assert elimina["parameters"]["required"] == ["numero"]
+
+
+def test_note_end_to_end(strumenti, file_note):
+    aggiunta = strumenti["aggiungi_nota"].esegui({"testo": "batteria scarica", "codice": "mis-001"})
+    assert aggiunta.startswith("Nota 1 salvata (MIS-001, ")
+    assert strumenti["elenca_note"].esegui({"codice": None}).startswith("Trovata 1 nota:")
+    with closing(sqlite3.connect(file_note)) as conn:
+        assert conn.execute("SELECT testo FROM note").fetchall() == [("batteria scarica",)]
+    assert "eliminata" in strumenti["elimina_nota"].esegui({"numero": "1"})
+    assert strumenti["elimina_nota"].esegui({"numero": "tre"}).startswith("Errore:")
+
+
+def test_note_db_non_valido(tmp_path):
+    file = tmp_path / "note.db"
+    file.write_text("non è un database", encoding="utf-8")
+    with pytest.raises(ErroreArchivio, match="archivio delle note non valido"):
+        with ClientArchivio(ambiente={"NOTE_DB": str(file)}):
+            pass
+
+
+def test_percorso_note(tmp_path):
+    assert main_archivio.percorso_note(None) == PERCORSO_NOTE_PREDEFINITO
+    assert main_archivio.percorso_note("") == PERCORSO_NOTE_PREDEFINITO
+    assert main_archivio.percorso_note("x/n.db") == CARTELLA_PROGETTO / "x/n.db"
+    assoluto = tmp_path / "n.db"
+    assert main_archivio.percorso_note(str(assoluto)) == assoluto
+
+
+def test_fuso_note():
+    roma = ZoneInfo("Europe/Rome")
+    assert main_archivio.fuso_note(None) == roma
+    assert main_archivio.fuso_note("") == roma
+    assert main_archivio.fuso_note("Marte/Olimpo") == roma
+    assert main_archivio.fuso_note("UTC") == ZoneInfo("UTC")
 
 
 def test_cerca_e_dettaglio(strumenti):
@@ -84,8 +161,8 @@ def test_argomento_di_tipo_sbagliato(strumenti):
 
 def test_avvio_da_altra_cartella(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    with ClientArchivio() as altro:
-        assert len(altro.strumenti()) == 2
+    with ClientArchivio(ambiente={"NOTE_DB": str(tmp_path / "note.db")}) as altro:
+        assert len(altro.strumenti()) == 5
 
 
 def test_avvio_fallito_comando_inesistente():
@@ -144,9 +221,9 @@ def test_avvio_con_chiusura_lenta(monkeypatch, caplog):
     assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
 
 
-def test_server_morto_a_meta_sessione(caplog):
+def test_server_morto_a_meta_sessione(caplog, tmp_path):
     with caplog.at_level(logging.WARNING):
-        with ClientArchivio(SERVER_CHE_MUORE) as client:
+        with ClientArchivio(SERVER_CHE_MUORE, ambiente={"NOTE_DB": str(tmp_path / "note.db")}) as client:
             cerca = {s.nome: s for s in client.strumenti()}["cerca_inventario"]
             assert cerca.esegui({"testo": "multimetro"}).startswith("Trovat")
             inizio = time.monotonic()
@@ -155,16 +232,16 @@ def test_server_morto_a_meta_sessione(caplog):
     assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
 
 
-def test_esegui_con_loop_chiuso():
-    with ClientArchivio() as client:
+def test_esegui_con_loop_chiuso(tmp_path):
+    with ClientArchivio(ambiente={"NOTE_DB": str(tmp_path / "note.db")}) as client:
         cerca = client.strumenti()[0]
     client._chiuso = False  # il loop si chiude fra il controllo e l'invio
     assert cerca.esegui({"testo": "multimetro"}) == "Errore: archivio non disponibile."
 
 
-def test_chiusura(caplog):
+def test_chiusura(caplog, tmp_path):
     with caplog.at_level(logging.WARNING, logger="assistente.mcp_client"):
-        with ClientArchivio() as proprio:
+        with ClientArchivio(ambiente={"NOTE_DB": str(tmp_path / "note.db")}) as proprio:
             cerca = proprio.strumenti()[0]
     assert proprio._thread.is_alive() is False
     assert caplog.records == []  # chiusura pulita, senza errori nel log
@@ -179,9 +256,10 @@ class _ServerFinto:
         self.gestore = signal.getsignal(signal.SIGINT)
 
 
-def test_main_ignora_sigint(monkeypatch):
+def test_main_ignora_sigint(tmp_path, monkeypatch):
     finto = _ServerFinto()
-    monkeypatch.setattr(main_archivio, "crea_server", lambda inventario: finto)
+    monkeypatch.setenv("NOTE_DB", str(tmp_path / "note.db"))
+    monkeypatch.setattr(main_archivio, "crea_server", lambda inventario, note: finto)
     originale = signal.getsignal(signal.SIGINT)
     try:
         assert main_archivio.main() == 0
@@ -194,6 +272,7 @@ def test_main_inventario_non_valido(tmp_path, monkeypatch, capsys):
     csv = tmp_path / "inventario.csv"
     csv.write_text("codice;nome\n", encoding="utf-8")
     monkeypatch.setattr(main_archivio, "PERCORSO_INVENTARIO", csv)
+    monkeypatch.setenv("NOTE_DB", str(tmp_path / "note.db"))
     originale = signal.getsignal(signal.SIGINT)
     try:
         assert main_archivio.main() == 1
@@ -205,6 +284,7 @@ def test_main_inventario_non_valido(tmp_path, monkeypatch, capsys):
 def test_main_inventario_non_leggibile(tmp_path, monkeypatch, capsys):
     csv = tmp_path / "manca.csv"
     monkeypatch.setattr(main_archivio, "PERCORSO_INVENTARIO", csv)
+    monkeypatch.setenv("NOTE_DB", str(tmp_path / "note.db"))
     originale = signal.getsignal(signal.SIGINT)
     try:
         assert main_archivio.main() == 1
@@ -213,3 +293,15 @@ def test_main_inventario_non_leggibile(tmp_path, monkeypatch, capsys):
     errore = capsys.readouterr().err
     assert errore.startswith(f"Errore: inventario non leggibile: {csv} (")
     assert errore.endswith(").\n") and "Traceback" not in errore
+
+
+def test_main_note_non_valide(tmp_path, monkeypatch, capsys):
+    file = tmp_path / "note.db"
+    file.write_text("non è un database", encoding="utf-8")
+    monkeypatch.setenv("NOTE_DB", str(file))
+    originale = signal.getsignal(signal.SIGINT)
+    try:
+        assert main_archivio.main() == 1
+    finally:
+        signal.signal(signal.SIGINT, originale)
+    assert capsys.readouterr().err.startswith("Errore: archivio delle note non valido")

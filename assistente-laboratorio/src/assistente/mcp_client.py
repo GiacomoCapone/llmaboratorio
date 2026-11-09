@@ -34,12 +34,19 @@ class ErroreArchivio(Exception):
     """Il server «archivio» non si è avviato."""
 
 
-def _ambiente() -> dict[str, str]:
-    """Variabili da aggiungere all'ambiente del sottoprocesso: `src/` in testa a PYTHONPATH."""
+def _ambiente(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """Variabili da aggiungere all'ambiente del sottoprocesso: `src/` in testa a PYTHONPATH.
+
+    `extra` (per esempio NOTE_DB) si aggiunge, ma non può sovrascrivere PYTHONPATH.
+    """
     percorsi = [str(CARTELLA_SRC)]
     if os.environ.get("PYTHONPATH"):
         percorsi.append(os.environ["PYTHONPATH"])
-    return {"PYTHONPATH": os.pathsep.join(percorsi), "PYTHONIOENCODING": "utf-8"}
+    return {
+        **(extra or {}),
+        "PYTHONPATH": os.pathsep.join(percorsi),
+        "PYTHONIOENCODING": "utf-8",
+    }
 
 
 def _descrivi(errore: BaseException, timeout: float) -> str:
@@ -54,7 +61,13 @@ def _descrivi(errore: BaseException, timeout: float) -> str:
 class ClientArchivio:
     """Context manager: avvia il server come sottoprocesso e ne espone gli strumenti."""
 
-    def __init__(self, comando: list[str] | None = None, timeout: float = 10.0):
+    def __init__(
+        self,
+        comando: list[str] | None = None,
+        timeout: float = 10.0,
+        ambiente: dict[str, str] | None = None,
+    ):
+        self._ambiente = ambiente
         self._comando = comando or [sys.executable, "-m", "archivio"]
         self._timeout = timeout
         self._chiuso = True
@@ -92,7 +105,7 @@ class ClientArchivio:
         try:
             async with AsyncExitStack() as stack:
                 parametri = StdioServerParameters(
-                    command=self._comando[0], args=self._comando[1:], env=_ambiente()
+                    command=self._comando[0], args=self._comando[1:], env=_ambiente(self._ambiente)
                 )
                 lettura, scrittura = await stack.enter_async_context(
                     stdio_client(parametri, errlog=self._errlog)

@@ -7,8 +7,10 @@ Richiedono LMSTUDIO_BASE_URL e LMSTUDIO_MODEL nell'ambiente. Lanciare con:
 
 import logging
 import re
+import tempfile
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -29,7 +31,9 @@ def esegui_domanda(domanda, caplog):
     config = carica_config()
     verifica_modello(config)
     inizio = time.perf_counter()
-    with ClientArchivio() as archivio:
+    with tempfile.TemporaryDirectory() as cartella, ClientArchivio(
+        ambiente={"NOTE_DB": str(Path(cartella) / "note.db")}
+    ) as archivio:
         grafo = build_graph(
             crea_llm(config),
             crea_strumenti(
