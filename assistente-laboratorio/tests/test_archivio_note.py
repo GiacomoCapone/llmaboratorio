@@ -247,3 +247,7 @@ def test_errore_sqlite_in_esercizio(tmp_path, note, operazione, caplog):
     assert any(
         r.name == "archivio.note" and r.levelno == logging.WARNING for r in caplog.records
     )
+
+
+def test_elimina_numero_oltre_il_limite_di_sqlite(note):
+    assert note.elimina(10**30) == f"Errore: nessuna nota con numero {10**30}."

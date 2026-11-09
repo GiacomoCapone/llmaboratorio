@@ -16,6 +16,7 @@ CARTELLA_PROGETTO = Path(__file__).resolve().parents[2]
 PERCORSO_NOTE_PREDEFINITO = CARTELLA_PROGETTO / "dati" / "note.db"
 
 NON_DISPONIBILE = "Errore: archivio delle note non disponibile."
+NUMERO_MASSIMO = 2**63 - 1  # massimo intero di SQLite
 LUNGHEZZA_TESTO = 500
 NOTE_MASSIME = 20
 ATTESA_LOCK = 5  # secondi di attesa se il database è bloccato
@@ -154,6 +155,8 @@ class Note:
         """Elimina la nota con quel numero e ne riporta il contenuto."""
         if isinstance(numero, bool) or not isinstance(numero, int) or numero <= 0:
             return "Errore: il numero della nota deve essere un intero positivo."
+        if numero > NUMERO_MASSIMO:  # oltre il limite di SQLite: di certo inesistente
+            return f"Errore: nessuna nota con numero {numero}."
         try:
             with closing(self._connetti()) as conn, conn:
                 riga = conn.execute(
