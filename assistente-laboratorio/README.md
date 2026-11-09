@@ -147,15 +147,15 @@ facoltativa.
 $env:PYTHONPATH = "src"
 .venv\Scripts\python.exe -m archivio
 ```
-Con un CSV valido il server parla MCP su stdin/stdout e resta in attesa; Ctrl-C è ignorato (lo
-chiude l'assistente, o la fine dell'input: Ctrl-Z e Invio in PowerShell). Verificato il 2026-11-09
-con `"" | .venv\Scripts\python.exe -m archivio`: termina con uscita 0 alla fine dell'input. Con un CSV
-non valido stampa l'errore con la riga ed esce con 1.
+Il server parla MCP su stdin/stdout. Verificato il 2026-11-09 con un CSV valido e
+`"" | .venv\Scripts\python.exe -m archivio`: termina con uscita 0 alla fine dell'input. Con un CSV
+non valido stampa l'errore con la riga ed esce con 1. Il comportamento con Ctrl-C a mano non è
+stato verificato.
 
 ### Dipendenza `mcp`
 Il catalogo usa l'SDK ufficiale `mcp==2.3.0` (`requirements.txt`). Porta 17 pacchetti in più, tutti
-con versione fissata, per lo più per i trasporti HTTP e l'autenticazione (`httpx`, `cryptography`,
-`jsonschema`, ...) che qui non si usano: si usa solo lo stdio.
+con versione fissata, per lo più per i trasporti HTTP e l'autenticazione (`starlette`, `uvicorn`, `sse-starlette`,
+`PyJWT`, `cryptography`, ...) che qui non si usano: si usa solo lo stdio. `pywin32` è solo per Windows.
 
 ## Test
 ```powershell
@@ -327,8 +327,7 @@ $env:PYTHONIOENCODING = "utf-8"
   verso Internet. La prova `pytest -m rete -v` isola il problema dal modello.
 - **`Errore: archivio non avviato: ...`**: il server dell'inventario non è partito; il motivo segue i
   due punti. Cause: `inventario non valido, riga N: ...` (correggere il CSV, vedi «Modificare
-  l'inventario») oppure dipendenza `mcp` non installata (rifare l'installazione da
-  `requirements-dev.txt`). Per isolare il problema avviare il server da solo (vedi sopra).
+  l'inventario»). Per isolare il problema avviare il server da solo (vedi sopra).
 - **Variabile mancante nonostante il `.env`**: il file letto è `assistente-laboratorio/.env`; una
   riga `NOME` senza `=valore` conta come mancante, e una variabile impostata (anche vuota) nella
   sessione prevale sul file.
@@ -368,5 +367,5 @@ $env:PYTHONIOENCODING = "utf-8"
   diverso a testo corrotto: le prove manuali con input accentato vanno fatte con input ben codificato.
 - **Ctrl-C**: durante una risposta annulla solo il turno (`(turno annullato)`, cronologia
   invariata); all'avvio termina il programma con codice 130. Questi due comportamenti sono
-  coperti dai test automatici, non provati a mano con LM Studio (con il catalogo attivo l'archivio
-  ignora Ctrl-C e si chiude con l'assistente; la prova a mano resta da fare).
+  coperti dai test automatici, non provati a mano con LM Studio (con il catalogo attivo la prova a
+  mano di Ctrl-C resta da fare).
