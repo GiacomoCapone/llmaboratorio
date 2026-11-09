@@ -1,6 +1,6 @@
 """Registro degli strumenti a disposizione del modello."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -38,6 +38,7 @@ def crea_strumenti(
     fuso_predefinito: str,
     citta_patrono: str | None = None,
     scarica: Callable[[str, dict], dict] = scarica_json,
+    esterni: Sequence[Strumento] = (),
 ) -> dict[str, Strumento]:
     """Costruisce il registro, legando a ciascuno strumento le sue dipendenze."""
     festivita = carica_festivita(citta_patrono)
@@ -53,5 +54,6 @@ def crea_strumenti(
             lambda args: esegui_calendario(args, festivita),
         ),
         Strumento(DEFINIZIONE_METEO, lambda args: esegui_meteo(args, scarica)),
+        *esterni,
     ]
     return registro(strumenti)

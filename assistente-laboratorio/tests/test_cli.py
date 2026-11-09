@@ -1,10 +1,12 @@
 from datetime import datetime, timezone
 
+import pytest
 from langchain_core.messages import AIMessage
 
 from assistente.cli import ciclo, esegui_turno, main
 from assistente.grafo import MESSAGGIO_LIMITE, build_graph
-from assistente.strumenti import crea_strumenti
+from assistente.mcp_client import ErroreArchivio
+from assistente.strumenti import Strumento, crea_strumenti
 from finti import LlmFinto, richiesta_ora
 
 ADESSO = lambda: datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)  # noqa: E731
@@ -127,9 +129,65 @@ def test_ctrl_c_durante_il_turno_annulla_solo_il_turno():
     assert "Prima" not in unisci_testo(llm.chiamate[-1])
 
 
-def test_main_ctrl_c_all_avvio(monkeypatch, capsys):
+class ArchivioFinto:
+    def __init__(self, strumenti=(), errore=None):
+        self._strumenti = list(strumenti)
+        self._errore = errore
+        self.uscito = False
+
+    def __enter__(self):
+        if self._errore:
+            raise self._errore
+        return self
+
+    def __exit__(self, *eccezione):
+        self.uscito = True
+        return False
+
+    def strumenti(self):
+        return self._strumenti
+
+
+def imposta_env(monkeypatch):
     monkeypatch.setenv("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
     monkeypatch.setenv("LMSTUDIO_MODEL", "modello-finto")
+
+
+def test_main_archivio_non_avviato(monkeypatch, capsys):
+    imposta_env(monkeypatch)
+    finto = ArchivioFinto(errore=ErroreArchivio("archivio non avviato: prova"))
+    monkeypatch.setattr("assistente.cli.ClientArchivio", lambda: finto)
+
+    def non_chiamare(config):
+        pytest.fail("verifica_modello chiamata prima dell'archivio")
+
+    monkeypatch.setattr("assistente.cli.verifica_modello", non_chiamare)
+    assert main() == 1
+    assert "Errore: archivio non avviato: prova" in capsys.readouterr().err
+
+
+def test_main_passa_gli_strumenti_dell_archivio(monkeypatch):
+    imposta_env(monkeypatch)
+    definizione = {"type": "function", "function": {"name": "prova_esterna", "parameters": {}}}
+    finto = ArchivioFinto([Strumento(definizione, lambda args: "x")])
+    monkeypatch.setattr("assistente.cli.ClientArchivio", lambda: finto)
+    monkeypatch.setattr("assistente.cli.verifica_modello", lambda config: None)
+    monkeypatch.setattr("assistente.cli.crea_llm", lambda config: None)
+    nomi = []
+
+    def grafo_finto(llm, strumenti, max_passaggi):
+        nomi.extend(strumenti)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("assistente.cli.build_graph", grafo_finto)
+    assert main() == 130
+    assert "prova_esterna" in nomi
+    assert finto.uscito is True
+
+
+def test_main_ctrl_c_all_avvio(monkeypatch, capsys):
+    imposta_env(monkeypatch)
+    monkeypatch.setattr("assistente.cli.ClientArchivio", lambda: ArchivioFinto())
 
     def interrompi(config):
         raise KeyboardInterrupt

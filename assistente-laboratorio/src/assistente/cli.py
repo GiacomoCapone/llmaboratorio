@@ -10,6 +10,7 @@ from langchain_core.messages import BaseMessage, HumanMessage
 
 from assistente.config import ErroreConfigurazione, carica_config
 from assistente.grafo import build_graph
+from assistente.mcp_client import ClientArchivio, ErroreArchivio
 from assistente.modello import ErroreModello, crea_llm, verifica_modello
 from assistente.strumenti import crea_strumenti
 
@@ -78,16 +79,18 @@ def main() -> int:
             format="%(asctime)s %(levelname)s %(name)s %(message)s",
             stream=sys.stderr,
         )
-        verifica_modello(config)
-        strumenti = crea_strumenti(
-            lambda: datetime.now(timezone.utc),
-            config.fuso_predefinito,
-            config.citta_patrono,
-        )
-        grafo = build_graph(crea_llm(config), strumenti, config.max_passaggi)
-        print("Assistente del laboratorio. Scrivere 'esci' per terminare.")
-        ciclo(grafo, lambda: input("> "), print)
-    except (ErroreConfigurazione, ErroreModello) as errore:
+        with ClientArchivio() as archivio:
+            verifica_modello(config)
+            strumenti = crea_strumenti(
+                lambda: datetime.now(timezone.utc),
+                config.fuso_predefinito,
+                config.citta_patrono,
+                esterni=archivio.strumenti(),
+            )
+            grafo = build_graph(crea_llm(config), strumenti, config.max_passaggi)
+            print("Assistente del laboratorio. Scrivere 'esci' per terminare.")
+            ciclo(grafo, lambda: input("> "), print)
+    except (ErroreConfigurazione, ErroreModello, ErroreArchivio) as errore:
         print(f"Errore: {errore}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:

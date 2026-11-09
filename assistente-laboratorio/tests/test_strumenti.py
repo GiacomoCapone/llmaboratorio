@@ -36,6 +36,23 @@ def test_nomi_duplicati():
         registro(doppio)
 
 
+def test_esterni_in_coda():
+    def esegui(args):
+        return "esterno"
+
+    definizione = {"type": "function", "function": {"name": "prova_esterna", "parameters": {}}}
+    esterno = Strumento(definizione, esegui)
+    reg = crea_strumenti(ADESSO, "Europe/Rome", esterni=[esterno])
+    assert list(reg)[-1] == "prova_esterna"
+    assert reg["prova_esterna"].esegui is esegui
+
+
+def test_esterno_con_nome_duplicato():
+    doppio = Strumento(DEFINIZIONE_CALCOLA, esegui_calcola)
+    with pytest.raises(ValueError, match="nome duplicato"):
+        crea_strumenti(ADESSO, "Europe/Rome", esterni=[doppio])
+
+
 def test_registro_citta_sconosciuta():
     with pytest.raises(ErroreConfigurazione):
         crea_strumenti(ADESSO, "Europe/Rome", "Milano")
