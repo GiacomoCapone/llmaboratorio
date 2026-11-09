@@ -18,6 +18,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from assistente.config import carica_config
 from archivio.inventario import PERCORSO_INVENTARIO, carica
+from archivio.note import apri
 from assistente.grafo import build_graph
 from assistente.mcp_client import ClientArchivio
 from assistente.modello import crea_llm, verifica_modello
@@ -26,13 +27,16 @@ from assistente.strumenti import crea_strumenti
 pytestmark = pytest.mark.reale
 
 
-def esegui_domanda(domanda, caplog):
-    """Esegue un turno con il grafo vero; restituisce lo stato e i risultati validi degli strumenti."""
+def esegui_domanda(domanda, caplog, note_db: Path | None = None):
+    """Esegue un turno con il grafo vero; restituisce lo stato e i risultati validi degli strumenti.
+
+    `note_db`: file delle note (anche già popolato); se None, un file in una cartella temporanea.
+    """
     config = carica_config()
     verifica_modello(config)
     inizio = time.perf_counter()
     with tempfile.TemporaryDirectory() as cartella, ClientArchivio(
-        ambiente={"NOTE_DB": str(Path(cartella) / "note.db")}
+        ambiente={"NOTE_DB": str(note_db or Path(cartella) / "note.db")}
     ) as archivio:
         grafo = build_graph(
             crea_llm(config),
@@ -244,6 +248,70 @@ def test_il_modello_cerca_per_categoria(caplog):
         f"nessun ToolMessage che inizia con 'Trovat': {risultati} (chiamate: {chiamate})"
     )
     print("chiamate catalogo:", [(c["name"], c["args"]) for c in chiamate])
+
+
+def prepara_nota(note_db, testo, codice):
+    """Crea una nota prima del turno; restituisce il suo numero."""
+    risposta = apri(
+        note_db, carica(PERCORSO_INVENTARIO), lambda: datetime.now(ZoneInfo("Europe/Rome"))
+    ).aggiungi(testo, codice)
+    return int(re.match(r"Nota (\d+) ", risposta).group(1))
+
+
+def test_il_modello_aggiunge_una_nota(caplog, tmp_path):
+    stato, _ = esegui_domanda(
+        "Annota che il multimetro MIS-001 ha la batteria scarica", caplog, tmp_path / "note.db"
+    )
+    chiamate = chiamate_strumenti(stato)
+    risultati = risultati_strumenti(stato)
+    print("chiamate note:", [(c["name"], c["args"]) for c in chiamate])
+    assert any(
+        c["name"] == "aggiungi_nota" and str(c["args"].get("codice", "")).lower() == "mis-001"
+        for c in chiamate
+    ), f"aggiungi_nota non chiamato con MIS-001: {chiamate}"
+    assert any(r.startswith("Nota ") and "salvata" in r for r in risultati), (
+        f"nessun ToolMessage 'Nota ... salvata': {risultati} (chiamate: {chiamate})"
+    )
+
+
+def test_il_modello_elenca_le_note(caplog, tmp_path):
+    note_db = tmp_path / "note.db"
+    prepara_nota(note_db, "Batteria scarica", "MIS-001")
+    stato, _ = esegui_domanda("Quali note ci sono?", caplog, note_db)
+    chiamate = chiamate_strumenti(stato)
+    risultati = risultati_strumenti(stato)
+    print("chiamate note:", [(c["name"], c["args"]) for c in chiamate])
+    assert any(c["name"] == "elenca_note" for c in chiamate), f"elenca_note non chiamato: {chiamate}"
+    assert any(r.startswith("Trovat") for r in risultati), (
+        f"nessun ToolMessage che inizia con 'Trovat': {risultati} (chiamate: {chiamate})"
+    )
+
+
+def test_il_modello_elimina_una_nota(caplog, tmp_path):
+    note_db = tmp_path / "note.db"
+    numero = prepara_nota(note_db, "Batteria scarica", "MIS-001")
+    stato, _ = esegui_domanda(f"Elimina la nota {numero}", caplog, note_db)
+    chiamate = chiamate_strumenti(stato)
+    risultati = risultati_strumenti(stato)
+    print("chiamate note:", [(c["name"], c["args"]) for c in chiamate])
+    assert any(
+        c["name"] == "elimina_nota" and int(c["args"].get("numero", -1)) == numero
+        for c in chiamate
+    ), f"elimina_nota non chiamato con numero {numero}: {chiamate}"
+    assert any("eliminata" in r for r in risultati), (
+        f"nessun ToolMessage con 'eliminata': {risultati} (chiamate: {chiamate})"
+    )
+
+
+def test_mostrare_le_note_non_elimina(caplog, tmp_path):
+    note_db = tmp_path / "note.db"
+    prepara_nota(note_db, "Batteria scarica", "MIS-001")
+    stato, _ = esegui_domanda("Mostrami le note", caplog, note_db)
+    chiamate = chiamate_strumenti(stato)
+    print("chiamate note:", [(c["name"], c["args"]) for c in chiamate])
+    assert not any(c["name"] == "elimina_nota" for c in chiamate), (
+        f"elimina_nota chiamato per una semplice richiesta di lettura: {chiamate}"
+    )
 
 
 def test_osserva_domanda_di_previsione(caplog):
