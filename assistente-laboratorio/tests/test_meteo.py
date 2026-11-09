@@ -152,11 +152,12 @@ def test_localita_troppo_lunga():
 
 
 @pytest.mark.parametrize("geocoding", [{"generationtime_ms": 0.1}, {"results": []}])
-def test_non_trovata(geocoding):
+@pytest.mark.parametrize("nome", ["L'Aquilaa", "Forlì"])
+def test_non_trovata(geocoding, nome):
     scarica = ScaricaFinta([geocoding])
     assert (
-        esegui_meteo({"localita": "L'Aquilaa"}, scarica)
-        == "Errore: località non trovata: 'L'Aquilaa'."
+        esegui_meteo({"localita": nome}, scarica)
+        == f"Errore: località non trovata: '{nome}'."
     )
 
 
@@ -274,3 +275,18 @@ def test_parametri_estranei():
 
 def test_definizione():
     assert DEFINIZIONE_METEO == DEFINIZIONE
+
+
+@pytest.mark.parametrize(
+    "campo, valore",
+    [
+        ("temperature_2m", float("nan")),
+        ("temperature_2m", float("inf")),
+        ("temperature_2m", 10**400),
+        ("relative_humidity_2m", float("nan")),
+        ("wind_direction_10m", float("inf")),
+    ],
+)
+def test_numeri_non_finiti(campo, valore):
+    risultato = esegui_meteo({"localita": "x"}, finta(attuali=con_current(**{campo: valore})))
+    assert risultato == "Errore: risposta del servizio meteo non valida."

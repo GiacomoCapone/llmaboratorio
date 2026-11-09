@@ -1,5 +1,6 @@
 """Strumento meteo: condizioni attuali di una località tramite Open-Meteo."""
 
+import math
 from typing import Callable
 
 from assistente.strumenti.rete import ErroreRete
@@ -88,6 +89,12 @@ class _RispostaNonValida(Exception):
 def _numero(valori: dict, chiave: str) -> float:
     valore = valori.get(chiave)
     if isinstance(valore, bool) or not isinstance(valore, (int, float)):
+        raise _RispostaNonValida(chiave)
+    try:
+        finito = math.isfinite(float(valore))
+    except OverflowError:
+        finito = False
+    if not finito:
         raise _RispostaNonValida(chiave)
     return valore
 
