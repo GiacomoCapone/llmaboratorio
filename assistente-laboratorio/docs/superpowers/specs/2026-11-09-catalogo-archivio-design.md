@@ -172,7 +172,7 @@ il client li presenta come `Errore: <testo del server>` (vedi sotto).
   richieste normali non scrivono sul terminale.
 - `__main__.py`: `python -m archivio` ignora `SIGINT` (il Ctrl-C dato nel terminale arriva anche al
   sottoprocesso: il server deve sopravvivere a un turno annullato e termina quando l'assistente chiude
-  lo stdin), carica i dati (uscita 1 con il messaggio su stderr se non validi) e avvia il server su
+  lo stdin), carica i dati (uscita 1 con il messaggio su stderr se non validi o non leggibili) e avvia il server su
   stdio.
 - Il pacchetto `archivio` non importa nulla da `assistente` e viceversa.
 
@@ -183,8 +183,10 @@ il client li presenta come `Errore: <testo del server>` (vedi sotto).
     corrente con `PYTHONPATH` che inizia con la cartella `src/` (ricavata dalla posizione di
     `assistente`), così funziona dal `.venv` con `avvia.py`, con pytest e in Docker.
   - `__enter__`: avvia un thread (daemon) con un proprio event loop; nel thread apre `stdio_client` e
-    `ClientSession`, esegue `initialize()` e `list_tools()`. Il thread principale attende al massimo
-    `timeout` secondi. Qualsiasi fallimento (comando inesistente, server uscito, timeout) chiude ciò che
+    `ClientSession`, esegue `initialize()` e `list_tools()`. La fase di protocollo (`initialize()` e
+    `list_tools()`) ha un limite di `timeout` secondi; il thread principale attende in più al massimo
+    `ATTESA_CHIUSURA` secondi, perché la pila si chiuda nel proprio compito. Un timeout dà il motivo
+    `il server non ha risposto entro N secondi.`. Qualsiasi fallimento (comando inesistente, server uscito, timeout) chiude ciò che
     era aperto, ferma il loop e solleva `ErroreArchivio("archivio non avviato: <motivo>")`; se il server ha scritto su
     stderr, il motivo lo riporta (il messaggio di validazione del CSV deve arrivare all'utente).
   - Lo stderr del server va in un file temporaneo per tutta la sessione (non sul terminale della

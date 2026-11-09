@@ -327,7 +327,11 @@ $env:PYTHONIOENCODING = "utf-8"
   verso Internet. La prova `pytest -m rete -v` isola il problema dal modello.
 - **`Errore: archivio non avviato: ...`**: il server dell'inventario non è partito; il motivo segue i
   due punti. Cause: `inventario non valido, riga N: ...` (correggere il CSV, vedi «Modificare
-  l'inventario»). Per isolare il problema avviare il server da solo (vedi sopra).
+  l'inventario»); `inventario non leggibile: <percorso> (No such file or directory).` (il CSV manca
+  o non si apre). Per isolare il problema avviare il server da solo (vedi sopra).
+- **`Errore: archivio non avviato: il server non ha risposto entro 10 secondi.`**: il server non ha
+  completato l'avvio in tempo (per esempio un primo avvio molto lento o un antivirus che analizza i
+  file). Riprovare; se si ripete, avviare il server da solo (vedi sopra) per vederne gli errori.
 - **Variabile mancante nonostante il `.env`**: il file letto è `assistente-laboratorio/.env`; una
   riga `NOME` senza `=valore` conta come mancante, e una variabile impostata (anche vuota) nella
   sessione prevale sul file.
