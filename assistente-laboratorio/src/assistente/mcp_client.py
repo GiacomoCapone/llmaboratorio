@@ -159,4 +159,5 @@ class ClientArchivio:
 
     def _stderr_del_server(self) -> str:
         self._errlog.seek(0)
-        return self._errlog.read().strip()
+        testo = self._errlog.read().strip()
+        return testo.removeprefix("Errore: ")  # la CLI aggiunge già «Errore:»

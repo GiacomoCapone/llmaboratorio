@@ -101,6 +101,7 @@ def test_avvio_fallito_con_messaggio():
             pass
     assert "archivio non avviato" in str(info.value)
     assert "riga 3: prova" in str(info.value)
+    assert str(info.value) == "archivio non avviato: inventario non valido, riga 3: prova."
 
 
 def test_chiusura(caplog):
