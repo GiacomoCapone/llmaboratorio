@@ -14,6 +14,9 @@ LIVELLI_RAGIONAMENTO = ("none", "low", "medium", "high")
 # la cartella da cui si avvia il programma. Nell'immagine Docker non esiste: lì vale l'ambiente.
 PERCORSO_ENV_PROGETTO = Path(__file__).resolve().parents[2] / ".env"
 PERCORSO_ENV = PERCORSO_ENV_PROGETTO
+CARTELLA_PROGETTO = PERCORSO_ENV_PROGETTO.parent
+# Database delle note: il server «archivio» lo riceve dall'ambiente (assistente non importa archivio).
+NOTE_DB_PREDEFINITO = CARTELLA_PROGETTO / "dati" / "note.db"
 
 
 class ErroreConfigurazione(Exception):
@@ -29,6 +32,7 @@ class Config:
     reasoning_effort: str
     fuso_predefinito: str
     citta_patrono: str | None = None
+    note_db: Path = NOTE_DB_PREDEFINITO
 
 
 def _obbligatoria(env: Mapping[str, str], nome: str) -> str:
@@ -85,6 +89,14 @@ def carica_config(env: Mapping[str, str] | None = None) -> Config:
 
     citta_patrono = env.get("CITTA_PATRONO", "").strip() or None
 
+    grezzo_note = env.get("NOTE_DB", "").strip()
+    if grezzo_note:
+        note_db = Path(grezzo_note)
+        if not note_db.is_absolute():
+            note_db = CARTELLA_PROGETTO / note_db
+    else:
+        note_db = NOTE_DB_PREDEFINITO
+
     return Config(
         base_url,
         model,
@@ -93,4 +105,5 @@ def carica_config(env: Mapping[str, str] | None = None) -> Config:
         reasoning_effort,
         fuso_predefinito,
         citta_patrono,
+        note_db,
     )

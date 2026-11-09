@@ -1,6 +1,12 @@
 import pytest
 
-from assistente.config import Config, ErroreConfigurazione, carica_config
+from assistente.config import (
+    CARTELLA_PROGETTO,
+    NOTE_DB_PREDEFINITO,
+    Config,
+    ErroreConfigurazione,
+    carica_config,
+)
 
 BASE = {"LMSTUDIO_BASE_URL": "http://localhost:1234/v1", "LMSTUDIO_MODEL": "modello"}
 
@@ -148,3 +154,23 @@ def test_il_file_env_e_quello_del_progetto():
 
     radice = Path(__file__).resolve().parents[1]
     assert modulo.PERCORSO_ENV_PROGETTO == radice / ".env"
+
+
+@pytest.mark.parametrize(
+    "valore, atteso",
+    [
+        (None, NOTE_DB_PREDEFINITO),
+        ("  ", NOTE_DB_PREDEFINITO),
+        ("altro/n.db", CARTELLA_PROGETTO / "altro" / "n.db"),
+        ("__ASSOLUTO__", "__ASSOLUTO__"),
+    ],
+)
+def test_note_db(tmp_path, valore, atteso):
+    env = dict(BASE)
+    if valore == "__ASSOLUTO__":
+        valore = atteso = str(tmp_path / "n.db")
+    if valore is not None:
+        env["NOTE_DB"] = valore
+    cfg = carica_config(env)
+    assert cfg.note_db.is_absolute()
+    assert cfg.note_db == type(cfg.note_db)(atteso)

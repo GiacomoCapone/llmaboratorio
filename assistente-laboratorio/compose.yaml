@@ -7,5 +7,9 @@ services:
     environment:
       # Sovrascrive il valore dell'.env locale: dal container l'host è host.docker.internal
       LMSTUDIO_BASE_URL: http://host.docker.internal:1234/v1
+      # Il database delle note sta nel volume montato sotto, non nell'immagine
+      NOTE_DB: /app/dati/note.db
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      - ./dati:/app/dati

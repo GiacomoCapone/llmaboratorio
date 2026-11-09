@@ -79,7 +79,11 @@ def main() -> int:
             format="%(asctime)s %(levelname)s %(name)s %(message)s",
             stream=sys.stderr,
         )
-        with ClientArchivio() as archivio:
+        ambiente = {
+            "NOTE_DB": str(config.note_db),
+            "FUSO_PREDEFINITO": config.fuso_predefinito,
+        }
+        with ClientArchivio(ambiente=ambiente) as archivio:
             verifica_modello(config)
             strumenti = crea_strumenti(
                 lambda: datetime.now(timezone.utc),

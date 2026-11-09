@@ -156,7 +156,7 @@ def imposta_env(monkeypatch):
 def test_main_archivio_non_avviato(monkeypatch, capsys):
     imposta_env(monkeypatch)
     finto = ArchivioFinto(errore=ErroreArchivio("archivio non avviato: prova"))
-    monkeypatch.setattr("assistente.cli.ClientArchivio", lambda: finto)
+    monkeypatch.setattr("assistente.cli.ClientArchivio", lambda **kwargs: finto)
 
     def non_chiamare(config):
         pytest.fail("verifica_modello chiamata prima dell'archivio")
@@ -170,7 +170,7 @@ def test_main_passa_gli_strumenti_dell_archivio(monkeypatch):
     imposta_env(monkeypatch)
     definizione = {"type": "function", "function": {"name": "prova_esterna", "parameters": {}}}
     finto = ArchivioFinto([Strumento(definizione, lambda args: "x")])
-    monkeypatch.setattr("assistente.cli.ClientArchivio", lambda: finto)
+    monkeypatch.setattr("assistente.cli.ClientArchivio", lambda **kwargs: finto)
     monkeypatch.setattr("assistente.cli.verifica_modello", lambda config: None)
     monkeypatch.setattr("assistente.cli.crea_llm", lambda config: None)
     nomi = []
@@ -185,9 +185,30 @@ def test_main_passa_gli_strumenti_dell_archivio(monkeypatch):
     assert finto.uscito is True
 
 
+def test_main_passa_note_db_e_fuso(monkeypatch, tmp_path):
+    imposta_env(monkeypatch)
+    percorso = tmp_path / "note.db"
+    monkeypatch.setenv("NOTE_DB", str(percorso))
+    monkeypatch.setenv("FUSO_PREDEFINITO", "UTC")
+    ricevuti = {}
+
+    def crea_finto(**kwargs):
+        ricevuti.update(kwargs)
+        return ArchivioFinto()
+
+    monkeypatch.setattr("assistente.cli.ClientArchivio", crea_finto)
+
+    def interrompi(config):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("assistente.cli.verifica_modello", interrompi)
+    assert main() == 130
+    assert ricevuti["ambiente"] == {"NOTE_DB": str(percorso), "FUSO_PREDEFINITO": "UTC"}
+
+
 def test_main_ctrl_c_all_avvio(monkeypatch, capsys):
     imposta_env(monkeypatch)
-    monkeypatch.setattr("assistente.cli.ClientArchivio", lambda: ArchivioFinto())
+    monkeypatch.setattr("assistente.cli.ClientArchivio", lambda **kwargs: ArchivioFinto())
 
     def interrompi(config):
         raise KeyboardInterrupt
