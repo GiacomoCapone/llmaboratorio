@@ -6,12 +6,13 @@ Richiedono LMSTUDIO_BASE_URL e LMSTUDIO_MODEL nell'ambiente. Lanciare con:
 """
 
 import logging
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pytest
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from assistente.config import carica_config
 from assistente.grafo import build_graph
@@ -146,3 +147,36 @@ def test_catena_orologio_calendario(caplog):
 
 def test_catena_orologio_calendario_con_oggi(caplog):
     verifica_catena(caplog, "Che giorno sarà tra 30 giorni a partire da oggi?")
+
+
+def chiamate_strumenti(stato):
+    return [c for m in stato["messaggi"] if isinstance(m, AIMessage) for c in m.tool_calls]
+
+
+def test_il_modello_usa_il_meteo(caplog):
+    stato, validi = esegui_domanda("Che tempo fa a Trieste?", caplog)
+    chiamate = [
+        c
+        for c in chiamate_strumenti(stato)
+        if c["name"] == "meteo_attuale" and "trieste" in str(c["args"].get("localita", "")).lower()
+    ]
+    assert chiamate, f"meteo_attuale non chiamato per Trieste: {chiamate_strumenti(stato)}"
+    risultati = [
+        str(m.content) for m in stato["messaggi"] if isinstance(m, ToolMessage)
+    ]
+    assert not any(r.startswith("Errore:") for r in risultati), risultati
+    meteo = [v for v in validi if v.startswith("Luogo:")]
+    assert meteo, f"nessun ToolMessage valido con 'Luogo:': {validi}"
+    trovato = re.search(r"Temperatura: (-?\d+(?:,\d+)?) °C", meteo[0])
+    assert trovato, f"riga Temperatura assente: {meteo[0]!r}"
+    t = float(trovato.group(1).replace(",", "."))
+    finale = str(stato["messaggi"][-1].content)
+    assert str(int(t)) in finale or str(round(t)) in finale, (
+        f"risposta senza la temperatura {t}: {finale!r}"
+    )
+
+
+def test_osserva_domanda_di_previsione(caplog):
+    stato, _ = esegui_domanda("Che tempo farà domani a Trieste?", caplog)
+    print("strumenti chiamati:", [(c["name"], c["args"]) for c in chiamate_strumenti(stato)])
+    print("risposta finale:", stato["messaggi"][-1].content)
