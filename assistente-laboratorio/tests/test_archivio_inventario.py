@@ -70,6 +70,23 @@ def test_errori_di_validazione(tmp_path, testo, riga):
         carica(percorso)
 
 
+@pytest.mark.parametrize("testo", ["", "\n\n", " ; ;\n"])
+def test_file_senza_intestazione(tmp_path, testo):
+    percorso = tmp_path / "inventario.csv"
+    percorso.write_text(testo, encoding="utf-8")
+    with pytest.raises(ErroreInventario, match=r"^inventario non valido, riga 1: intestazione non valida\.$"):
+        carica(percorso)
+
+
+def test_righe_vuote_prima_dell_intestazione(tmp_path):
+    percorso = tmp_path / "inventario.csv"
+    percorso.write_text("\n\n" + INTESTAZIONE + "\n" + MULTIMETRO + "\n", encoding="utf-8")
+    assert [a.codice for a in carica(percorso).articoli] == ["MIS-001"]
+    percorso.write_text("\ncodice;nome\n", encoding="utf-8")
+    with pytest.raises(ErroreInventario, match=r"^inventario non valido, riga 2: intestazione non valida\.$"):
+        carica(percorso)
+
+
 def test_descrizione_vuota_ammessa(tmp_path):
     assert inventario(tmp_path, [OSCILLOSCOPIO]).articoli[0].descrizione == ""
 

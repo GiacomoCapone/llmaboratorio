@@ -42,10 +42,12 @@ def _ambiente() -> dict[str, str]:
     return {"PYTHONPATH": os.pathsep.join(percorsi), "PYTHONIOENCODING": "utf-8"}
 
 
-def _descrivi(errore: BaseException) -> str:
+def _descrivi(errore: BaseException, timeout: float) -> str:
     """Testo dell'errore, cercato dentro i gruppi di eccezioni di anyio con un solo elemento."""
     while isinstance(errore, BaseExceptionGroup) and len(errore.exceptions) == 1:
         errore = errore.exceptions[0]
+    if isinstance(errore, TimeoutError):
+        return f"il server non ha risposto entro {timeout:g} secondi."
     return str(errore) or type(errore).__name__
 
 
@@ -60,7 +62,7 @@ class ClientArchivio:
 
     def __enter__(self) -> "ClientArchivio":
         self._loop = asyncio.new_event_loop()
-        self._thread = threading.Thread(target=self._loop.run_forever, name="archivio-mcp", daemon=True)
+        self._thread = threading.Thread(target=self._gira, name="archivio-mcp", daemon=True)
         self._thread.start()
         self._errlog = tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace")
         self._pronto: concurrent.futures.Future = concurrent.futures.Future()
@@ -70,13 +72,20 @@ class ClientArchivio:
             self._strumenti_mcp = self._pronto.result(self._timeout + ATTESA_CHIUSURA)
         except BaseException as errore:
             self._ferma(attesa=ATTESA_CHIUSURA)
-            motivo = self._stderr_del_server() or _descrivi(errore)
+            motivo = self._stderr_del_server() or _descrivi(errore, self._timeout)
             self._errlog.close()
             if not isinstance(errore, Exception):
                 raise
             raise ErroreArchivio(f"archivio non avviato: {motivo}") from errore
         self._chiuso = False
         return self
+
+    def _gira(self) -> None:
+        """Corpo del thread: il loop gira finché `_ferma` non lo ferma, poi si chiude qui."""
+        try:
+            self._loop.run_forever()
+        finally:
+            self._loop.close()
 
     async def _vivi(self) -> None:
         """Apre sessione e sottoprocesso, attende la richiesta di chiusura e li chiude."""
@@ -121,14 +130,19 @@ class ClientArchivio:
     def _chiama(self, nome: str, args: dict) -> str:
         if self._chiuso:
             return NON_DISPONIBILE
-        futuro = asyncio.run_coroutine_threadsafe(self._sessione.call_tool(nome, args), self._loop)
+        chiamata = self._sessione.call_tool(nome, args)
+        futuro = None
         try:
+            # Dentro il try: il loop può chiudersi fra il controllo di `_chiuso` e l'invio.
+            futuro = asyncio.run_coroutine_threadsafe(chiamata, self._loop)
             risultato = futuro.result(self._timeout)
         except TimeoutError:
             futuro.cancel()
             logger.warning("archivio: %s senza risposta entro %s s", nome, self._timeout)
             return NESSUNA_RISPOSTA
         except Exception as errore:
+            if futuro is None:
+                chiamata.close()  # mai inviata al loop: evita «coroutine was never awaited»
             logger.warning("archivio: %s fallito: %r", nome, errore)
             return NON_DISPONIBILE
         testo = "\n".join(b.text for b in risultato.content if hasattr(b, "text"))
@@ -145,17 +159,18 @@ class ClientArchivio:
         return False
 
     def _ferma(self, attesa: float) -> None:
-        """Chiede la chiusura della sessione, ne attende la fine, poi ferma il loop e il thread."""
+        """Chiede la chiusura della sessione e ferma il loop quando il compito è davvero finito."""
         self._loop.call_soon_threadsafe(self._fine.set)
         try:
             self._vita.result(attesa)
         except concurrent.futures.TimeoutError:
+            # Nessun annullamento: la chiusura dell'SDK è protetta e ha attese limitate (alcuni
+            # secondi), e il sottoprocesso termina comunque con lo stdin chiuso (POSIX) o con il Job
+            # Object (Windows). Il thread daemon finisce da solo e chiude il proprio loop.
             logger.warning("archivio: chiusura non conclusa entro %s s", attesa)
-            self._vita.cancel()
-        self._loop.call_soon_threadsafe(self._loop.stop)
+        # Fermare il loop prima della fine del compito lo lascerebbe pendente.
+        self._vita.add_done_callback(lambda _: self._loop.call_soon_threadsafe(self._loop.stop))
         self._thread.join(attesa)
-        if not self._thread.is_alive():
-            self._loop.close()
 
     def _stderr_del_server(self) -> str:
         self._errlog.seek(0)

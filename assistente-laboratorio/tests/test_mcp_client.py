@@ -1,12 +1,16 @@
 """Client MCP dell'assistente con il server «archivio» vero, avviato come sottoprocesso."""
 
+import asyncio
 import logging
 import signal
 import sys
+import time
+from pathlib import Path
 
 import pytest
 
 import archivio.__main__ as main_archivio
+from assistente import mcp_client
 from assistente.mcp_client import ClientArchivio, ErroreArchivio
 
 DESCRIZIONE_CERCA = (
@@ -104,6 +108,60 @@ def test_avvio_fallito_con_messaggio():
     assert str(info.value) == "archivio non avviato: inventario non valido, riga 3: prova."
 
 
+SERVER_MUTO = [sys.executable, "-c", "import time; time.sleep(60)"]
+SERVER_CHE_MUORE = [sys.executable, str(Path(__file__).parent / "server_finti" / "muore_dopo_una_chiamata.py")]
+
+
+def test_avvio_fallito_per_timeout(caplog):
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ErroreArchivio) as info:
+            with ClientArchivio(SERVER_MUTO, timeout=2.0):
+                pass
+    assert str(info.value) == "archivio non avviato: il server non ha risposto entro 2 secondi."
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+
+
+class _ClientSpia(ClientArchivio):
+    """Ricorda il compito asincrono della sessione, per controllare che non resti pendente."""
+
+    async def _vivi(self):
+        self.compito = asyncio.current_task()
+        await super()._vivi()
+
+
+def test_avvio_con_chiusura_lenta(monkeypatch, caplog):
+    # L'SDK impiega alcuni secondi a chiudere un server che ignora lo stdin: con un margine minimo
+    # il client non attende, ma il loop si ferma solo a compito finito e il thread lo chiude.
+    monkeypatch.setattr(mcp_client, "ATTESA_CHIUSURA", 0.1)
+    client = _ClientSpia(SERVER_MUTO, timeout=1.0)
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ErroreArchivio, match="il server non ha risposto entro 1 secondi"):
+            with client:
+                pass
+        client._thread.join(15)
+    assert not client._thread.is_alive()
+    assert client.compito.done() and client._loop.is_closed()
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+
+
+def test_server_morto_a_meta_sessione(caplog):
+    with caplog.at_level(logging.WARNING):
+        with ClientArchivio(SERVER_CHE_MUORE) as client:
+            cerca = {s.nome: s for s in client.strumenti()}["cerca_inventario"]
+            assert cerca.esegui({"testo": "multimetro"}).startswith("Trovat")
+            inizio = time.monotonic()
+            assert cerca.esegui({"testo": "multimetro"}) == "Errore: archivio non disponibile."
+            assert time.monotonic() - inizio < 5
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+
+
+def test_esegui_con_loop_chiuso():
+    with ClientArchivio() as client:
+        cerca = client.strumenti()[0]
+    client._chiuso = False  # il loop si chiude fra il controllo e l'invio
+    assert cerca.esegui({"testo": "multimetro"}) == "Errore: archivio non disponibile."
+
+
 def test_chiusura(caplog):
     with caplog.at_level(logging.WARNING, logger="assistente.mcp_client"):
         with ClientArchivio() as proprio:
@@ -142,3 +200,16 @@ def test_main_inventario_non_valido(tmp_path, monkeypatch, capsys):
     finally:
         signal.signal(signal.SIGINT, originale)
     assert capsys.readouterr().err.startswith("Errore: inventario non valido, riga")
+
+
+def test_main_inventario_non_leggibile(tmp_path, monkeypatch, capsys):
+    csv = tmp_path / "manca.csv"
+    monkeypatch.setattr(main_archivio, "PERCORSO_INVENTARIO", csv)
+    originale = signal.getsignal(signal.SIGINT)
+    try:
+        assert main_archivio.main() == 1
+    finally:
+        signal.signal(signal.SIGINT, originale)
+    errore = capsys.readouterr().err
+    assert errore.startswith(f"Errore: inventario non leggibile: {csv} (")
+    assert errore.endswith(").\n") and "Traceback" not in errore

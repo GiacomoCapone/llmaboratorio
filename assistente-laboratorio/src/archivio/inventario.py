@@ -53,16 +53,21 @@ def _articolo_da_campi(riga: int, campi: list[str]) -> Articolo:
 
 
 def carica(percorso: Path) -> "Inventario":
-    """Legge e valida il CSV (UTF-8, separatore ';', BOM tollerato)."""
+    """Legge e valida il CSV (UTF-8, separatore ';', BOM tollerato).
+
+    Le righe vuote sono ignorate; la prima riga non vuota è l'intestazione.
+    """
     articoli: list[Articolo] = []
     codici: set[str] = set()
+    intestazione_letta = False
     with open(percorso, encoding="utf-8-sig", newline="") as file:
         for numero, campi in enumerate(csv.reader(file, delimiter=";"), start=1):
             if not any(c.strip() for c in campi):
                 continue
-            if numero == 1:
+            if not intestazione_letta:
                 if [c.strip() for c in campi] != COLONNE:
-                    raise _errore(1, "intestazione non valida")
+                    raise _errore(numero, "intestazione non valida")
+                intestazione_letta = True
                 continue
             articolo = _articolo_da_campi(numero, campi)
             chiave = normalizza(articolo.codice)
@@ -70,6 +75,8 @@ def carica(percorso: Path) -> "Inventario":
                 raise _errore(numero, f"codice ripetuto '{articolo.codice}'")
             codici.add(chiave)
             articoli.append(articolo)
+    if not intestazione_letta:
+        raise _errore(1, "intestazione non valida")
     return Inventario(articoli)
 
 

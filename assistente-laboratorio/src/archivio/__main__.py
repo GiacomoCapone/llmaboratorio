@@ -16,6 +16,10 @@ def main() -> int:
     except ErroreInventario as errore:
         print(f"Errore: {errore}", file=sys.stderr)
         return 1
+    except OSError as errore:
+        dettaglio = errore.strerror or str(errore)
+        print(f"Errore: inventario non leggibile: {PERCORSO_INVENTARIO} ({dettaglio}).", file=sys.stderr)
+        return 1
     crea_server(inventario).run("stdio")
     return 0
 
