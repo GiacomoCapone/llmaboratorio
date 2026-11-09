@@ -1,5 +1,6 @@
 """Richieste HTTP GET che restituiscono JSON, con errori di rete leggibili."""
 
+import http.client
 import json
 import logging
 import urllib.error
@@ -45,6 +46,10 @@ def scarica_json(url: str, parametri: dict) -> dict:
             ) from e
         raise _guasto(
             url, "non raggiungibile", f"servizio meteo non raggiungibile ({motivo})."
+        ) from e
+    except http.client.HTTPException as e:
+        raise _guasto(
+            url, "risposta non valida", "risposta del servizio meteo non valida."
         ) from e
     except OSError as e:
         raise _guasto(

@@ -1,5 +1,6 @@
 """Test del modulo di rete: nessuna connessione reale, urlopen è sostituito."""
 
+import http.client
 import logging
 import urllib.error
 
@@ -118,3 +119,19 @@ def test_guasto_registrato(urlopen_finto, caplog):
     testo = record[0].getMessage()
     assert URL in testo
     assert "Forl" not in testo
+
+
+def test_lettura_troncata(urlopen_finto):
+    urlopen_finto(RispostaFinta(errore_lettura=http.client.IncompleteRead(b"")))
+    with pytest.raises(ErroreRete) as info:
+        scarica_json(URL, {})
+    assert str(info.value) == MSG_NON_VALIDA
+
+
+def test_riga_di_stato_malformata(urlopen_finto, caplog):
+    urlopen_finto(eccezione=http.client.BadStatusLine("x"))
+    with caplog.at_level(logging.WARNING, logger="assistente.strumenti.rete"):
+        with pytest.raises(ErroreRete) as info:
+            scarica_json(URL, {})
+    assert str(info.value) == MSG_NON_VALIDA
+    assert any(r.levelno == logging.WARNING for r in caplog.records)
