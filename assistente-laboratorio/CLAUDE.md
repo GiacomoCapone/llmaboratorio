@@ -4,10 +4,12 @@ Progetto del corso «Deep Learning e LLM: costruire chatbot e agenti».
 La cartella del progetto è `assistente-laboratorio/`.
 
 ## Struttura e comandi
-- Codice in `src/assistente/` (`config`, `modello`, `strumenti/`, `grafo`, `cli`); test in `tests/`,
+- Codice in `src/assistente/` (`config`, `modello`, `strumenti/`, `grafo`, `mcp_client`, `cli`); test in `tests/`,
   prove con LM Studio in `tests/reale/`; specifica e piano in `docs/superpowers/`.
 - `strumenti/` è un pacchetto: un modulo per strumento e il registro (`crea_strumenti`) in
   `__init__.py`; il grafo esegue gli strumenti per nome senza conoscerli.
+- `src/archivio/`: server MCP «archivio» (inventario CSV `inventario.csv`), avviato dall'assistente via stdio;
+  `mcp_client` lo collega al registro degli strumenti.
 - Test automatici (senza modello): `python -m pytest`.
 - Prova reale con LM Studio attivo e `LMSTUDIO_BASE_URL`/`LMSTUDIO_MODEL` nel `.env` (o nell'ambiente):
   `python -m pytest -m reale -v` (esclusa di default).
@@ -28,6 +30,7 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
 - offre un convertitore di unità SI (unità di base e derivate con prefisso, aree, volumi, K e °C);
 - offre un calendario: differenza fra date e data + N giorni, di calendario o lavorativi, con festività italiane e patrono;
 - offre il meteo attuale di una località (Open-Meteo, richiede Internet);
+- offre un catalogo dell'inventario del laboratorio (ricerca e dettaglio) tramite il server MCP «archivio»;
 - si avvia anche con Docker Compose.
 
 ## Confini

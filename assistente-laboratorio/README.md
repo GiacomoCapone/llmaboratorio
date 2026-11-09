@@ -127,12 +127,42 @@ Il modello li richiede tramite tool calling; il programma li esegue davvero (reg
   ```
   Errori in forma `Errore: ...`.
 
+- **Catalogo dell'inventario** (`cerca_inventario`, `dettaglio_articolo`): ricerca per testo o
+  categoria e scheda di un articolo dall'inventario del laboratorio (`src/archivio/inventario.csv`).
+  Gli strumenti sono offerti dal server MCP «archivio» (`src/archivio/`), che l'assistente avvia da sé
+  come sottoprocesso via stdio all'avvio: nessuna configurazione. Se non parte, l'assistente non si
+  avvia (vedi «Diagnosi»). Esempi di domande: «Abbiamo dei multimetri? Dove sono?», «Dammi i dettagli
+  dell'articolo MIS-001», «Che cosa c'è fra gli strumenti di misura?».
+
+### Modificare l'inventario
+`src/archivio/inventario.csv` è un file UTF-8 con separatore `;` e prima riga di intestazione
+`codice;nome;categoria;quantita;collocazione;descrizione`. Regole (il file è riletto a ogni avvio
+del server; un errore ferma l'avvio con il numero di riga): sei campi per riga; `codice`, `nome`,
+`categoria` e `collocazione` obbligatori; `quantita` intera non negativa; `codice` non ripetuto
+(esempio verificato: `inventario non valido, riga 29: codice ripetuto 'MIS-001'.`); `descrizione`
+facoltativa.
+
+### Server archivio da solo (diagnosi)
+```powershell
+$env:PYTHONPATH = "src"
+.venv\Scripts\python.exe -m archivio
+```
+Con un CSV valido il server parla MCP su stdin/stdout e resta in attesa; Ctrl-C è ignorato (lo
+chiude l'assistente, o la fine dell'input: Ctrl-Z e Invio in PowerShell). Verificato il 2026-11-09
+con `"" | .venv\Scripts\python.exe -m archivio`: termina con uscita 0 alla fine dell'input. Con un CSV
+non valido stampa l'errore con la riga ed esce con 1.
+
+### Dipendenza `mcp`
+Il catalogo usa l'SDK ufficiale `mcp==2.3.0` (`requirements.txt`). Porta 17 pacchetti in più, tutti
+con versione fissata, per lo più per i trasporti HTTP e l'autenticazione (`httpx`, `cryptography`,
+`jsonschema`, ...) che qui non si usano: si usa solo lo stdio.
+
 ## Test
 ```powershell
 .venv\Scripts\python.exe -m pytest
 ```
-I test non richiedono un modello attivo né Internet (esito verificato il 2026-11-09: 436 passati, 15
-deselezionati: 13 `reale` e 2 `rete`).
+I test non richiedono un modello attivo né Internet (esito verificato il 2026-11-09: 477 passati, 18
+deselezionati: 16 `reale` e 2 `rete`).
 
 Prova con Open-Meteo vero (Internet, senza modello; esclusa di default, marker `rete`):
 ```powershell
@@ -159,8 +189,12 @@ sul valore del file `.env`. Atteso senza `LMSTUDIO_MODEL`: errore che cita la va
 
 Il 2026-11-09 il container ha risposto anche con il meteo (vedi «Verifiche reali»).
 
+Il 2026-11-09 il container ha risposto anche con il catalogo (il server «archivio» parte dentro il
+container, `src/` è nell'immagine): vedi «Verifiche reali».
+
 Ancora da verificare: l'avvio interattivo senza `-T` (con terminale) di `docker compose run --rm
-assistente`, e l'esame dei log del container.
+assistente`, l'esame dei log del container e Ctrl-C a metà turno con il catalogo attivo (la domanda
+successiva sull'inventario deve funzionare; non eseguibile da una shell non interattiva).
 
 ## Verifiche reali
 Eseguite il 2026-10-26 con LM Studio sull'host (`http://localhost:1234/v1`) e il modello
@@ -264,10 +298,37 @@ echo "Che tempo fa a Pordenone?" | PYTHONIOENCODING=utf-8 docker compose run --r
 tempo è **coperto**, la temperatura è di **6,3 °C** (percepita 4,9 °C), l'umidità è dell'**89 %**, ...»:
 il container raggiunge sia LM Studio sia Open-Meteo.
 
+Catalogo (server MCP «archivio», 2026-11-09), `CITTA_PATRONO=Pordenone` nell'ambiente, da Git Bash:
+```bash
+CITTA_PATRONO=Pordenone .venv/Scripts/python.exe -m pytest -m reale -v -s
+```
+→ `15 passed, 1 xpassed` in 209 s (`xpassed`: la catena orologio→calendario senza «oggi», marcata
+`xfail` non rigida, stavolta è passata; non è una garanzia). Tre prove nuove, modello
+`google/gemma-4-e2b`: «Abbiamo dei multimetri? Dove sono?» → `cerca_inventario`, risposta con la
+collocazione; «Dammi i dettagli dell'articolo MIS-001» → `dettaglio_articolo`; «Che cosa c'è fra gli
+strumenti di misura?» → `cerca_inventario` con categoria «strumenti di misura».
+
+Prova manuale 2026-11-09 da PowerShell: `"esci" | .venv\Scripts\python.exe avvia.py` con LM Studio
+attivo → saluto, uscita 0; `tasklist /FI "IMAGENAME eq python.exe"` prima e dopo: nessun processo
+`python.exe`, quindi il server dell'archivio non resta attivo. Con un codice duplicato nel CSV:
+`Errore: archivio non avviato: inventario non valido, riga 29: codice ripetuto 'MIS-001'.`, uscita 1.
+
+Docker 2026-11-09, da PowerShell, dopo `docker compose build` (riuscito):
+```powershell
+$env:PYTHONIOENCODING = "utf-8"
+"Abbiamo dei multimetri? Dove sono?", "esci" | docker compose run --rm -T assistente
+```
+→ uscita 0; `tool_call nome=cerca_inventario args={'testo': 'multimetro'}`, risultato
+`MIS-001 — Multimetro digitale — 4 pezzi — Armadio A, ripiano 2` e risposta con «Armadio A, ripiano 2».
+
 ## Diagnosi
 - **`Errore: ... servizio meteo non raggiungibile (...)` o `il servizio meteo non ha risposto entro N secondi`**: manca la connessione a Internet o è
   bloccata (proxy, firewall, rete aziendale); in Docker verificare che il container abbia uscita
   verso Internet. La prova `pytest -m rete -v` isola il problema dal modello.
+- **`Errore: archivio non avviato: ...`**: il server dell'inventario non è partito; il motivo segue i
+  due punti. Cause: `inventario non valido, riga N: ...` (correggere il CSV, vedi «Modificare
+  l'inventario») oppure dipendenza `mcp` non installata (rifare l'installazione da
+  `requirements-dev.txt`). Per isolare il problema avviare il server da solo (vedi sopra).
 - **Variabile mancante nonostante il `.env`**: il file letto è `assistente-laboratorio/.env`; una
   riga `NOME` senza `=valore` conta come mancante, e una variabile impostata (anche vuota) nella
   sessione prevale sul file.
@@ -307,4 +368,5 @@ il container raggiunge sia LM Studio sia Open-Meteo.
   diverso a testo corrotto: le prove manuali con input accentato vanno fatte con input ben codificato.
 - **Ctrl-C**: durante una risposta annulla solo il turno (`(turno annullato)`, cronologia
   invariata); all'avvio termina il programma con codice 130. Questi due comportamenti sono
-  coperti dai test automatici, non provati a mano con LM Studio.
+  coperti dai test automatici, non provati a mano con LM Studio (con il catalogo attivo l'archivio
+  ignora Ctrl-C e si chiude con l'assistente; la prova a mano resta da fare).
