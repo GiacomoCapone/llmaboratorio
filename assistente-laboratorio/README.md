@@ -112,11 +112,33 @@ Il modello li richiede tramite tool calling; il programma li esegue davvero (reg
   festività nell'intervallo: 2026-12-08 Immacolata Concezione, 2026-12-25 Natale, 2026-12-26 Santo Stefano`.
   Errori in forma `Errore: ...`, per esempio `Errore: data non valida: '05/02/2026'. ...`.
 
+- **Meteo** (`meteo_attuale`): condizioni attuali di una località da Open-Meteo; **richiede Internet**.
+  Il nome è cercato con il geocoding di Open-Meteo e si usa il primo risultato, mostrato nella riga
+  `Luogo:` (controllare che sia la località voluta). Niente previsioni: solo l'ora della rilevazione.
+  Esempio (Pordenone, 2026-11-09):
+  ```
+  Luogo: Pordenone, Friuli Venezia Giulia, Italia
+  Rilevazione: 2026-11-09 09:15 (ora locale, Europe/Rome)
+  Cielo: coperto
+  Temperatura: 6,3 °C (percepita 4,9 °C)
+  Umidità: 89 %
+  Precipitazioni: 0,0 mm
+  Vento: 1,1 km/h da est
+  ```
+  Errori in forma `Errore: ...`.
+
 ## Test
 ```powershell
 .venv\Scripts\python.exe -m pytest
 ```
-I test non richiedono un modello attivo (esito verificato il 2026-11-03: 353 passati, 11 deselezionati).
+I test non richiedono un modello attivo né Internet (esito verificato il 2026-11-09: 436 passati, 15
+deselezionati: 13 `reale` e 2 `rete`).
+
+Prova con Open-Meteo vero (Internet, senza modello; esclusa di default, marker `rete`):
+```powershell
+.venv\Scripts\python.exe -m pytest -m rete -v
+```
+Esito del 2026-11-09: 2 passati.
 
 ## Docker: verificato e da verificare
 Su Python 3.14 sono verificati: l'installazione di `requirements.txt` in un `.venv` locale, i test
@@ -134,6 +156,8 @@ docker compose run --rm assistente
 ```
 Il servizio imposta `LMSTUDIO_BASE_URL=http://host.docker.internal:1234/v1`, che prevale
 sul valore del file `.env`. Atteso senza `LMSTUDIO_MODEL`: errore che cita la variabile, uscita 1.
+
+Il 2026-11-09 il container ha risposto anche con il meteo (vedi «Verifiche reali»).
 
 Ancora da verificare: l'avvio interattivo senza `-T` (con terminale) di `docker compose run --rm
 assistente`, e l'esame dei log del container.
@@ -221,7 +245,29 @@ Docker 2026-11-03 (Docker Desktop attivo): `docker compose build` riuscito; `doc
 novembre 2026 a Natale?», «che ore sono», `esci`): il container raggiunge LM Studio, chiama `calendario`
 (36 lavorativi) e `ora_corrente`, uscita 0.
 
+Con il meteo (strumento `meteo_attuale`, 2026-11-09), `CITTA_PATRONO=Pordenone` nell'ambiente
+(il `.env` non la contiene), eseguito da Git Bash (non PowerShell):
+```bash
+CITTA_PATRONO=Pordenone .venv/Scripts/python.exe -m pytest -m reale -v -s
+```
+→ `12 passed, 438 deselected, 1 xfailed in 125.73s`. Le due prove nuove passano: «Che tempo fa a
+Trieste?» (9,1 s) chiama `meteo_attuale` con `localita` Trieste, il risultato inizia con `Luogo:` e
+la risposta riporta la temperatura; «Che tempo farà domani a Trieste?» (2,8 s) è solo osservata:
+il modello non ha chiamato alcuno strumento e ha risposto «Per darti le previsioni del tempo per domani
+a Trieste, ho bisogno di sapere la data di oggi. Per favore, dimmi oggi.» (una sola esecuzione).
+
+Docker 2026-11-09, da Git Bash (con `PYTHONIOENCODING=utf-8`), dopo `docker compose build`:
+```bash
+echo "Che tempo fa a Pordenone?" | PYTHONIOENCODING=utf-8 docker compose run --rm -T -e CITTA_PATRONO=Pordenone assistente
+```
+→ uscita 0; `tool_call nome=meteo_attuale args={'localita': 'Pordenone'}` e risposta «A Pordenone il
+tempo è **coperto**, la temperatura è di **6,3 °C** (percepita 4,9 °C), l'umidità è dell'**89 %**, ...»:
+il container raggiunge sia LM Studio sia Open-Meteo.
+
 ## Diagnosi
+- **`Errore: ... servizio meteo non raggiungibile (...)` o `il servizio meteo non ha risposto entro N secondi`**: manca la connessione a Internet o è
+  bloccata (proxy, firewall, rete aziendale); in Docker verificare che il container abbia uscita
+  verso Internet. La prova `pytest -m rete -v` isola il problema dal modello.
 - **Variabile mancante nonostante il `.env`**: il file letto è `assistente-laboratorio/.env`; una
   riga `NOME` senza `=valore` conta come mancante, e una variabile impostata (anche vuota) nella
   sessione prevale sul file.

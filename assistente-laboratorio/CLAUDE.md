@@ -14,6 +14,7 @@ La cartella del progetto è `assistente-laboratorio/`.
 - Avvio: `python avvia.py` da qualunque cartella (usa il `.venv`, legge il `.env` del progetto,
   senza variabili né `PYTHONPATH`);
   con Docker: `docker compose run --rm assistente`.
+- Prova con Open-Meteo vero (Internet, senza modello): `python -m pytest -m rete -v` (esclusa di default).
 - Dettagli di configurazione e diagnosi nel `README.md`.
 
 ## Obiettivo
@@ -26,6 +27,7 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
 - offre una calcolatrice sicura (quattro operazioni e parentesi, decimali esatti, senza `eval`);
 - offre un convertitore di unità SI (unità di base e derivate con prefisso, aree, volumi, K e °C);
 - offre un calendario: differenza fra date e data + N giorni, di calendario o lavorativi, con festività italiane e patrono;
+- offre il meteo attuale di una località (Open-Meteo, richiede Internet);
 - si avvia anche con Docker Compose.
 
 ## Confini
