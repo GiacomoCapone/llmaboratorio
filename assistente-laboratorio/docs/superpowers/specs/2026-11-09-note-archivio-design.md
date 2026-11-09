@@ -73,14 +73,15 @@ CREATE TABLE IF NOT EXISTS note (
 
 ### `aggiungi_nota(testo, codice=None)`
 Descrizione (alla lettera):
-«Salva una nota del laboratorio (promemoria, guasto, osservazione), facoltativamente legata al codice
-di un articolo dell'inventario, per esempio MIS-003. Chiamalo SEMPRE quando l'utente chiede di
-annotare, ricordare o segnare qualcosa.»
+«Salva una nota del laboratorio (promemoria, guasto, osservazione). Chiamalo SEMPRE quando l'utente
+chiede di annotare, ricordare o segnare qualcosa, senza chiedere altro. Il codice di un articolo
+dell'inventario (per esempio MIS-003) va indicato solo se l'utente lo scrive; altrimenti la nota si
+salva senza codice.»
 
 Parametri:
 - `testo` (stringa, obbligatorio): «Testo della nota, per esempio display difettoso.»
-- `codice` (stringa o `null`, facoltativo): «Codice dell'articolo a cui si riferisce la nota, per
-  esempio MIS-003.»
+- `codice` (stringa o `null`, facoltativo): «Facoltativo: codice dell'articolo, solo se l'utente lo
+  indica, per esempio MIS-003.»
 
 Risultato:
 - con codice: `Nota 7 salvata (MIS-003, 2026-11-09 14:32): display difettoso.`
@@ -90,13 +91,13 @@ Il punto finale è aggiunto solo se il testo non termina già con `.`, `!` o `?`
 
 ### `elenca_note(codice=None)`
 Descrizione (alla lettera):
-«Elenca le note del laboratorio, dalla più recente, con numero, data, codice dell'articolo e testo;
-con un codice mostra solo le note di quell'articolo. Chiamalo quando l'utente chiede le note o i
-promemoria salvati.»
+«Elenca le note del laboratorio, dalla più recente, con numero, data, codice dell'articolo e testo.
+Chiamalo SEMPRE quando l'utente chiede le note o i promemoria salvati, senza chiedere altro: senza
+codice mostra tutte le note.»
 
 Parametri:
-- `codice` (stringa o `null`, facoltativo): «Codice di un articolo per vedere solo le sue note, per
-  esempio MIS-003.»
+- `codice` (stringa o `null`, facoltativo): «Facoltativo: codice di un articolo, solo se l'utente lo
+  indica, per vedere solo le sue note.»
 
 Risultato (al massimo 20 note, dalla più recente):
 ```
@@ -162,7 +163,22 @@ Risultato:
   `PYTHONPATH` e `PYTHONIOENCODING` nell'ambiente del sottoprocesso.
 - `cli.main()` passa `ambiente={"NOTE_DB": str(config.note_db), "FUSO_PREDEFINITO":
   config.fuso_predefinito}`.
-- Registro e grafo invariati: i tre strumenti arrivano come `esterni` (10 strumenti in tutto).
+- Registro invariato: i tre strumenti arrivano come `esterni` (10 strumenti in tutto).
+
+## Grafo: ripetizione dopo una risposta vuota
+Modifica della regola del ciclo 1 (`2026-11-02-calcolatrice-e-registro-design.md`), approvata
+dall'utente dopo le prove reali di questo ciclo.
+- Problema osservato (2026-11-09, `google/gemma-4-e2b`): dopo una richiesta all'imperativo («Annota
+  che…») e uno strumento riuscito, il modello risponde con un testo vuoto anche nella ripetizione senza
+  strumenti; 15 risposte vuote su 15 con cinque formulazioni diverse del risultato.
+- Regola: nella sola ripetizione (dopo un ToolMessage e una risposta vuota) il nodo `modello` chiama
+  il modello senza strumenti con, in testa ai messaggi, il messaggio di sistema
+  `ISTRUZIONE_RISPOSTA = "Rispondi all'utente riferendo il risultato degli strumenti."`. Il messaggio
+  non entra nello stato né nella cronologia; il log `WARNING risposta vuota dopo gli strumenti` resta.
+  Con l'istruzione: 9 risposte non vuote su 9 nella prova manuale.
+- Test automatico (`tests/test_grafo.py`): con un modello finto che risponde vuoto dopo lo strumento,
+  la ripetizione riceve come primo messaggio un `SystemMessage` con `ISTRUZIONE_RISPOSTA`, i messaggi
+  dello stato restano invariati e l'istruzione non compare nella cronologia finale.
 
 ## Docker
 - `compose.yaml`: `volumes: - ./dati:/app/dati` e `NOTE_DB: /app/dati/note.db` in `environment`
@@ -197,8 +213,11 @@ Risultato:
 ## Verifiche reali (marcatore `reale`, LM Studio attivo, `NOTE_DB` in `tmp_path`)
 - «Annota che il multimetro MIS-001 ha la batteria scarica» → chiamata a `aggiungi_nota` con codice
   `MIS-001` (senza maiuscole), ToolMessage che inizia con `Nota ` e contiene `salvata`.
+- «Annota che il saldatore va pulito» → chiamata a `aggiungi_nota` senza codice (assente, `null` o
+  vuoto), ToolMessage che inizia con `Nota ` e contiene `salvata`.
 - Con una nota già presente: «Quali note ci sono?» → chiamata a `elenca_note`, ToolMessage che inizia
   con `Trovat`.
+- In tutte le prove la risposta finale non è vuota (controllo già presente in `esegui_domanda`).
 - Con una nota numero N già presente: «Elimina la nota N» → chiamata a `elimina_nota` con numero N,
   ToolMessage che contiene `eliminata`.
 - Con una nota già presente: «Mostrami le note» → nessuna chiamata a `elimina_nota`.
