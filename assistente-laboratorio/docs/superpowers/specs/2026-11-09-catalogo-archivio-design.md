@@ -39,12 +39,21 @@ CSV dell'inventario, tramite due strumenti MCP: `cerca_inventario` e `dettaglio_
 
 ## Dipendenza
 - `mcp==2.3.0` (ultima versione su PyPI al 2026-11-09), con le dipendenze transitive fissate in
-  `requirements.txt`. Motivo: SDK ufficiale del protocollo, per il server (FastMCP) e per il client
+  `requirements.txt`. Motivo: SDK ufficiale del protocollo, per il server (`MCPServer`) e per il client
   (`stdio_client`, `ClientSession`).
-- Prima di scrivere codice il piano verifica, con un'installazione di prova nel `.venv`, l'elenco delle
-  dipendenze transitive (da concordare se ne compaiono di pesanti) e l'API esatta della versione 2.x
-  (nomi dei moduli, firma di `stdio_client`, forma di `CallToolResult`). Se l'API differisce da quanto
-  scritto qui, si aggiorna la specifica prima di procedere.
+- Verificato il 2026-11-09 con un'installazione di prova fuori dal progetto: `mcp==2.3.0` aggiunge 17
+  pacchetti (`attrs`, `cffi`, `click`, `cryptography`, `jsonschema`, `jsonschema-specifications`,
+  `mcp-types`, `opentelemetry-api`, `pycparser`, `PyJWT`, `python-multipart`, `pywin32` solo su
+  Windows, `referencing`, `rpds-py`, `sse-starlette`, `starlette`, `uvicorn`), in gran parte per i
+  trasporti HTTP e l'autenticazione, che qui non si usano; l'SDK non offre un'installazione ridotta.
+  `pywin32` va fissato con il marcatore `; sys_platform == "win32"`.
+- API 2.x verificata con un prototipo usa e getta: il server è `mcp.server.MCPServer` (FastMCP è stato
+  rinominato), con `MCPServer("archivio", log_level="WARNING")`, il decoratore
+  `@server.tool(description=...)` e `server.run("stdio")`; le descrizioni dei parametri si danno con
+  `Annotated[..., Field(description=...)]`. Il client usa `mcp.client.stdio.stdio_client(
+  StdioServerParameters(command, args, env), errlog=<file>)` e `mcp.ClientSession`; gli attributi sono
+  `tool.input_schema` e `risultato.is_error`. `env` si aggiunge a un sottoinsieme sicuro dell'ambiente,
+  quindi `PYTHONPATH` va passato esplicitamente.
 
 ## Dati: `src/archivio/inventario.csv`
 - UTF-8 (senza BOM; un BOM eventuale è tollerato in lettura), separatore `;`, prima riga di intestazione
@@ -87,7 +96,8 @@ Descrizione (fissata alla lettera):
 > restituisce codice, nome, quantità e collocazione degli articoli trovati. Chiamalo SEMPRE quando
 > l'utente chiede se in laboratorio c'è qualcosa, quanti pezzi ci sono o dove si trova.
 
-Parametri (entrambi facoltativi, testo, predefinito stringa vuota):
+Parametri (entrambi facoltativi, testo o `null`, predefinito `null`, trattato come stringa vuota:
+i modelli piccoli passano spesso `null` per i parametri facoltativi):
 - `testo` — «Parole da cercare nel nome, nella categoria, nella descrizione o nella collocazione,
   per esempio multimetro.»
 - `categoria` — «Nome esatto di una categoria, per esempio strumenti di misura.»
@@ -149,19 +159,21 @@ Le descrizioni sono fissate alla lettera: dopo ogni modifica si rilanciano le pr
 | `codice` vuoto | `Errore: indicare il codice dell'articolo, per esempio MIS-001.` |
 | codice sconosciuto | `Errore: nessun articolo con codice 'X'.` |
 
-Gli argomenti di tipo sbagliato o mancanti sono respinti dalla validazione di FastMCP con `isError`;
+Gli argomenti di tipo sbagliato o mancanti sono respinti dalla validazione di `MCPServer` con `is_error`;
 il client li presenta come `Errore: <testo del server>` (vedi sotto).
 
 ## Moduli del server: `src/archivio/`
 - `inventario.py`: logica pura, senza MCP. `Articolo` (dataclass immutabile), `ErroreInventario`,
   `carica(percorso) -> Inventario`, e sull'inventario `cerca(testo, categoria) -> str` e
   `dettaglio(codice) -> str`, che restituiscono il testo del risultato o dell'errore.
-- `server.py`: crea il server FastMCP chiamato `archivio`, carica l'inventario del pacchetto e dichiara i
-  due strumenti con le descrizioni sopra (le descrizioni dei parametri con `Annotated[..., Field(...)]`
-  o con il meccanismo equivalente della versione 2.x). Il livello di log del server è `WARNING`, così le
+- `server.py`: crea il server `MCPServer` chiamato `archivio`, carica l'inventario del pacchetto e dichiara i
+  due strumenti con le descrizioni sopra (le descrizioni dei parametri con
+  `Annotated[..., Field(description=...)]`). Il livello di log del server è `WARNING`, così le
   richieste normali non scrivono sul terminale.
-- `__main__.py`: `python -m archivio` carica i dati (uscita 1 con il messaggio su stderr se non validi)
-  e avvia il server su stdio.
+- `__main__.py`: `python -m archivio` ignora `SIGINT` (il Ctrl-C dato nel terminale arriva anche al
+  sottoprocesso: il server deve sopravvivere a un turno annullato e termina quando l'assistente chiude
+  lo stdin), carica i dati (uscita 1 con il messaggio su stderr se non validi) e avvia il server su
+  stdio.
 - Il pacchetto `archivio` non importa nulla da `assistente` e viceversa.
 
 ## Client: `src/assistente/mcp_client.py`
@@ -173,14 +185,16 @@ il client li presenta come `Errore: <testo del server>` (vedi sotto).
   - `__enter__`: avvia un thread (daemon) con un proprio event loop; nel thread apre `stdio_client` e
     `ClientSession`, esegue `initialize()` e `list_tools()`. Il thread principale attende al massimo
     `timeout` secondi. Qualsiasi fallimento (comando inesistente, server uscito, timeout) chiude ciò che
-    era aperto e solleva `ErroreArchivio("archivio non avviato: <motivo>")`; se il server ha scritto su
+    era aperto, ferma il loop e solleva `ErroreArchivio("archivio non avviato: <motivo>")`; se il server ha scritto su
     stderr, il motivo lo riporta (il messaggio di validazione del CSV deve arrivare all'utente).
+  - Lo stderr del server va in un file temporaneo per tutta la sessione (non sul terminale della
+    conversazione); all'avvio fallito il suo contenuto entra nel motivo.
   - `strumenti() -> list[Strumento]`: per ogni strumento del server, definizione
     `{"type": "function", "function": {"name", "description", "parameters": inputSchema}}` ed
     `esegui(args)` sincrono.
   - `esegui(args)`: invia `call_tool(nome, args)` al loop con `asyncio.run_coroutine_threadsafe` e attende
     al massimo `timeout` secondi. Il risultato è l'unione dei blocchi di testo del contenuto, separati da
-    `\n`. Con `isError` il testo è prefissato da `Errore: ` se non inizia già così.
+    `\n`. Con `is_error` il testo è prefissato da `Errore: ` se non inizia già così.
     Timeout → `Errore: l'archivio non ha risposto.`; sessione chiusa, server terminato o altro errore di
     comunicazione → `Errore: archivio non disponibile.` con il dettaglio nel log (`WARNING`).
     Non solleva eccezioni verso il grafo.
