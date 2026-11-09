@@ -171,8 +171,12 @@ def test_il_modello_usa_il_meteo(caplog):
     assert trovato, f"riga Temperatura assente: {meteo[0]!r}"
     t = float(trovato.group(1).replace(",", "."))
     finale = str(stato["messaggi"][-1].content)
-    assert str(int(t)) in finale or str(round(t)) in finale, (
-        f"risposta senza la temperatura {t}: {finale!r}"
+    candidati = {str(abs(int(t))), str(abs(round(t))), f"{abs(t):.1f}".replace(".", ",")}
+    candidati.add(f"{abs(t):.1f}")
+    modello = "|".join(re.escape(c) for c in sorted(candidati, key=len, reverse=True))
+    assert re.search(rf"(?<![\d.,])(?:{modello})(?!\d)", finale), (
+        f"risposta senza la temperatura {t} (cercati {sorted(candidati)} a confini di cifra): "
+        f"{finale!r}"
     )
 
 
