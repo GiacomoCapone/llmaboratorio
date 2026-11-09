@@ -143,6 +143,11 @@ class Inventario:
             return f"Nessun articolo trovato nella categoria «{categoria}»."
         return f"Nessun articolo trovato per «{testo}»."
 
+    def codice_canonico(self, codice: str) -> str | None:
+        """Il codice come scritto nel CSV (senza maiuscole né accenti nel confronto), o None."""
+        a = self._per_codice.get(normalizza(codice.strip()))
+        return a.codice if a else None
+
     def dettaglio(self, codice: str | None) -> str:
         """Le sei righe dell'articolo, o un testo di errore che inizia con «Errore:»."""
         codice = (codice or "").strip()
@@ -150,9 +155,10 @@ class Inventario:
             return "Errore: indicare il codice dell'articolo, per esempio MIS-001."
         if len(codice) > LUNGHEZZA_MASSIMA:
             return f"Errore: testo troppo lungo (massimo {LUNGHEZZA_MASSIMA} caratteri)."
-        a = self._per_codice.get(normalizza(codice))
-        if a is None:
+        canonico = self.codice_canonico(codice)
+        if canonico is None:
             return f"Errore: nessun articolo con codice '{codice}'."
+        a = self._per_codice[normalizza(canonico)]
         return "\n".join(
             [
                 f"Codice: {a.codice}",

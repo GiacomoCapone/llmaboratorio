@@ -211,6 +211,13 @@ def test_dettaglio_errori(tmp_path):
     assert inv.dettaglio("a" * 101) == "Errore: testo troppo lungo (massimo 100 caratteri)."
 
 
+def test_codice_canonico(tmp_path):
+    inv = inventario(tmp_path, [MULTIMETRO])
+    assert inv.codice_canonico(" mis-001 ") == "MIS-001"
+    assert inv.codice_canonico("XYZ-9") is None
+    assert inv.codice_canonico("") is None
+
+
 def test_inventario_del_pacchetto():
     inv = carica(PERCORSO_INVENTARIO)
     assert len(inv.articoli) >= 20
