@@ -1,0 +1,28 @@
+codice;nome;categoria;quantita;collocazione;descrizione
+MIS-001;Multimetro digitale;strumenti di misura;4;Armadio A, ripiano 2;Fluke 115: tensione, corrente, resistenza, continuità
+MIS-002;Oscilloscopio digitale;strumenti di misura;2;Bancone 3;Rigol DS1054Z a 4 canali, 50 MHz
+MIS-003;Pinza amperometrica;strumenti di misura;1;Armadio A, ripiano 2;Misura la corrente in alternata e continua senza aprire il circuito
+MIS-004;Analizzatore logico;strumenti di misura;0;Armadio A, ripiano 3;8 canali, in riparazione
+ALI-001;Alimentatore da banco;alimentatori;3;Bancone 1;0-30 V, 0-5 A, doppio canale
+ALI-002;Alimentatore USB 5 V;alimentatori;8;Armadio B, ripiano 1;Caricatore da 2,4 A per le schede
+ALI-003;Alimentatore 12 V;alimentatori;5;Armadio B, ripiano 1;Spina a jack 5,5 mm, 2 A
+PAS-001;Kit di resistenze;componenti passivi;6;Cassettiera C, cassetto 1;Serie E12 da 10 ohm a 1 Mohm, 1/4 W
+PAS-002;Kit di condensatori ceramici;componenti passivi;4;Cassettiera C, cassetto 2;Da 10 pF a 100 nF
+PAS-003;Condensatori elettrolitici;componenti passivi;40;Cassettiera C, cassetto 3;Valori da 1 uF a 1000 uF
+PAS-004;Potenziometri;componenti passivi;15;Cassettiera C, cassetto 4;Lineari da 10 kohm
+MCU-001;Arduino Uno;schede e microcontrollori;10;Armadio D, ripiano 1;Scheda con ATmega328P
+MCU-002;Raspberry Pi 4;schede e microcontrollori;5;Armadio D, ripiano 2;Scheda con 4 GB di memoria
+MCU-003;ESP32 DevKit;schede e microcontrollori;12;Armadio D, ripiano 1;Microcontrollore con Wi-Fi e Bluetooth
+MCU-004;Raspberry Pi Pico;schede e microcontrollori;0;Armadio D, ripiano 2;Da riordinare
+CAV-001;Cavo USB-C;cavi e connettori;20;Cassetto E1;Lunghezza 1 m
+CAV-002;Cavo USB-A micro USB;cavi e connettori;14;Cassetto E1;Lunghezza 1 m, per dati e ricarica
+CAV-003;Cavetti jumper;cavi e connettori;100;Cassetto E2;Maschio-maschio e maschio-femmina per breadboard
+CAV-004;Puntali a coccodrillo;cavi e connettori;10;Cassetto E2;Coppia di cavi con pinzette
+ATT-001;Saldatore a stagno;attrezzi;3;Bancone 2;Stazione saldante da 60 W regolabile
+ATT-002;Pinze a becco;attrezzi;4;Cassettiera F, cassetto 1;Per componenti piccoli
+ATT-003;Set di cacciaviti di precisione;attrezzi;6;Cassettiera F, cassetto 2;Punte a taglio e a croce
+ATT-004;Spellafili;attrezzi;3;Cassettiera F, cassetto 1;Per cavi da 0,2 a 6 mm
+SIC-001;Occhiali protettivi;sicurezza;12;Armadio G, ripiano 1;Con protezione laterale
+SIC-002;Guanti antitaglio;sicurezza;8;Armadio G, ripiano 1;Taglia M
+SIC-003;Estintore a CO2;sicurezza;2;Ingresso del laboratorio;Adatto ai quadri elettrici
+SIC-004;Cassetta di primo soccorso;sicurezza;1;Ingresso del laboratorio;Controllata ogni sei mesi
