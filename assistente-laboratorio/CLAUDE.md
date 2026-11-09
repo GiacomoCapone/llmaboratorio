@@ -10,6 +10,8 @@ La cartella del progetto è `assistente-laboratorio/`.
   `__init__.py`; il grafo esegue gli strumenti per nome senza conoscerli.
 - `src/archivio/`: server MCP «archivio» (inventario CSV `inventario.csv`), avviato dall'assistente via stdio;
   `mcp_client` lo collega al registro degli strumenti.
+- `dati/`: database SQLite delle note del laboratorio (`note.db`), creato al primo avvio, fuori da Git e da
+  Docker; in Docker è montato su `/app/dati`.
 - Test automatici (senza modello): `python -m pytest`.
 - Prova reale con LM Studio attivo e `LMSTUDIO_BASE_URL`/`LMSTUDIO_MODEL` nel `.env` (o nell'ambiente):
   `python -m pytest -m reale -v` (esclusa di default).
@@ -31,6 +33,7 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
 - offre un calendario: differenza fra date e data + N giorni, di calendario o lavorativi, con festività italiane e patrono;
 - offre il meteo attuale di una località (Open-Meteo, richiede Internet);
 - offre un catalogo dell'inventario del laboratorio (ricerca e dettaglio) tramite il server MCP «archivio»;
+- offre note del laboratorio persistenti (aggiunta, elenco, eliminazione), salvate in SQLite dallo stesso server;
 - si avvia anche con Docker Compose.
 
 ## Confini

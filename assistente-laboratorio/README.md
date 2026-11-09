@@ -2,7 +2,7 @@
 
 Applicazione da terminale in Python che conversa con un modello locale servito da LM Studio.
 Il flusso è un grafo LangGraph esplicito; la cronologia vale per la sola sessione (nessuna
-persistenza). Il modello può chiamare lo strumento orologio (fuso orario esplicito), eseguito
+persistenza); solo le note del laboratorio (vedi «Strumenti») restano in un database SQLite. Il modello può chiamare lo strumento orologio (fuso orario esplicito), eseguito
 davvero dal programma. LM Studio resta sul computer host e non è containerizzato.
 
 ## Prerequisiti
@@ -41,8 +41,8 @@ valore del file; così Docker Compose imposta l'indirizzo dell'host per il conta
 Variabili: `LMSTUDIO_BASE_URL` (default nell'esempio `http://localhost:1234/v1`), `LMSTUDIO_MODEL`
 (obbligatoria), `MAX_PASSAGGI` (default 5), `LOG_LEVEL` (default INFO),
 `LMSTUDIO_REASONING_EFFORT` (default `none`; ammessi `none`, `low`, `medium`, `high`) e
-`FUSO_PREDEFINITO` (default `Europe/Rome`, nome IANA) e `CITTA_PATRONO` (facoltativa, per esempio
-`Pordenone`). Un valore non ammesso per `LMSTUDIO_REASONING_EFFORT` o `FUSO_PREDEFINITO`, o una città
+`FUSO_PREDEFINITO` (default `Europe/Rome`, nome IANA), `CITTA_PATRONO` (facoltativa, per esempio
+`Pordenone`) e `NOTE_DB` (facoltativa, percorso del database delle note; vedi «Note del laboratorio»). Un valore non ammesso per `LMSTUDIO_REASONING_EFFORT` o `FUSO_PREDEFINITO`, o una città
 non presente in `src/assistente/strumenti/festivita.json`, ferma l'avvio con un errore (uscita 1). Per
 una città sconosciuta il messaggio è `Città del patrono sconosciuta: '<valore>'. Città disponibili: ...
 (file ...)`; verificato il 2026-11-03 con `CITTA_PATRONO=Milano` (uscita 1).
@@ -134,6 +134,40 @@ Il modello li richiede tramite tool calling; il programma li esegue davvero (reg
   avvia (vedi «Diagnosi»). Esempi di domande: «Abbiamo dei multimetri? Dove sono?», «Dammi i dettagli
   dell'articolo MIS-001», «Che cosa c'è fra gli strumenti di misura?».
 
+- **Note del laboratorio** (`aggiungi_nota`, `elenca_note`, `elimina_nota`): note di testo libero,
+  con un codice articolo facoltativo (verificato contro l'inventario), salvate in un database SQLite
+  e quindi **persistenti fra una sessione e l'altra**. Sono offerte dallo stesso server «archivio».
+  Ogni nota ha un numero progressivo e la data di salvataggio (nel fuso `FUSO_PREDEFINITO`);
+  `elenca_note` può filtrare per articolo; `elimina_nota` cancella per numero e riporta il testo
+  eliminato, senza chiedere conferma. Esempi di domande: «Annota che il multimetro MIS-001 ha la
+  batteria scarica», «Quali note ci sono?», «Elimina la nota 1».
+  Esempio (uscita reale, 2026-11-09, PowerShell, `google/gemma-4-e2b`; riga `tool_result` del log):
+  ```
+  tool_call nome=aggiungi_nota args={'testo': 'il saldatore va pulito'}
+  tool_result nome=aggiungi_nota risultato=Nota 1 salvata (2026-11-09 15:14): il saldatore va pulito.
+  ```
+  Errori in forma `Errore: ...`, per esempio `Errore: nessuna nota con numero 7.`
+
+### Note del laboratorio: database e Docker
+- Il database è `dati/note.db` nella cartella del progetto (la cartella `dati/` è ignorata da Git e da
+  Docker, ed è creata al primo avvio). `NOTE_DB` nel `.env` ne cambia il percorso; un percorso relativo
+  è risolto rispetto alla cartella del progetto, non a quella da cui si avvia.
+- Con Docker Compose `./dati` è montata su `/app/dati` e `NOTE_DB` vale `/app/dati/note.db` (prevale
+  sul `.env`): container e avvio locale **condividono lo stesso file**, quindi le note create in uno
+  compaiono nell'altro (verificato, vedi «Docker: verificato e da verificare»).
+- **Non usare container e avvio locale nello stesso momento**: il lock di SQLite su un mount di Docker
+  Desktop non è affidabile. Un lock trattenuto oltre 5 secondi dà `Errore: archivio delle note non
+  disponibile.`
+- Per azzerare le note si chiude l'assistente e si cancella il file:
+  ```powershell
+  Remove-Item dati\note.db
+  ```
+  (verificato il 2026-11-09 da PowerShell: dopo il comando `elenca_note` risponde `Nessuna nota.` e il
+  file si ricrea al primo avvio). Le note eliminate a voce si tolgono con «Elimina la nota N»
+  (verificato); il numero di una nota eliminata non è riusato (osservato: dopo l'eliminazione della
+  nota 1 la nota successiva è la 2) e riparte da 1 solo cancellando il file.
+- Una nota salvata con un fuso diverso da quello attuale mostra l'ora con cui è stata salvata.
+
 ### Modificare l'inventario
 `src/archivio/inventario.csv` è un file UTF-8 con separatore `;` e prima riga di intestazione
 `codice;nome;categoria;quantita;collocazione;descrizione`. Regole (il file è riletto a ogni avvio
@@ -161,8 +195,8 @@ con versione fissata, per lo più per i trasporti HTTP e l'autenticazione (`star
 ```powershell
 .venv\Scripts\python.exe -m pytest
 ```
-I test non richiedono un modello attivo né Internet (esito verificato il 2026-11-09: 477 passati, 18
-deselezionati: 16 `reale` e 2 `rete`).
+I test non richiedono un modello attivo né Internet (esito verificato il 2026-11-09: 535 passati, 23
+deselezionati: 21 `reale` e 2 `rete`).
 
 Prova con Open-Meteo vero (Internet, senza modello; esclusa di default, marker `rete`):
 ```powershell
@@ -191,6 +225,18 @@ Il 2026-11-09 il container ha risposto anche con il meteo (vedi «Verifiche real
 
 Il 2026-11-09 il container ha risposto anche con il catalogo (il server «archivio» parte dentro il
 container, `src/` è nell'immagine): vedi «Verifiche reali».
+
+Il 2026-11-09 è stata verificata la condivisione delle note fra container e host, da PowerShell
+(`$env:PYTHONIOENCODING = "utf-8"`), dopo `docker compose build` (uscita 0) e senza `dati/`:
+```powershell
+"Annota che il saldatore va pulito", "esci" | docker compose run --rm -T assistente
+"Quali note ci sono?", "esci" | .venv\Scripts\python.exe avvia.py
+"Elimina la nota 1", "esci" | .venv\Scripts\python.exe avvia.py
+"Quali note ci sono?", "esci" | .venv\Scripts\python.exe avvia.py
+```
+Tutte con uscita 0. Il container ha chiamato `aggiungi_nota` («Nota 1 salvata (2026-11-09 15:14): il
+saldatore va pulito.») e creato `dati/note.db`; dall'host `elenca_note` ha restituito `Trovata 1 nota:`
+con la stessa nota; `elimina_nota` l'ha eliminata e l'elenco successivo ha dato `Nessuna nota.`
 
 Ancora da verificare: l'avvio interattivo senza `-T` (con terminale) di `docker compose run --rm
 assistente`, l'esame dei log del container e Ctrl-C a metà turno con il catalogo attivo (la domanda
@@ -321,7 +367,27 @@ $env:PYTHONIOENCODING = "utf-8"
 → uscita 0; `tool_call nome=cerca_inventario args={'testo': 'multimetro'}`, risultato
 `MIS-001 — Multimetro digitale — 4 pezzi — Armadio A, ripiano 2` e risposta con «Armadio A, ripiano 2».
 
+Note del laboratorio (2026-11-09, `google/gemma-4-e2b`, `CITTA_PATRONO=Pordenone` nell'ambiente), da
+Git Bash:
+```bash
+CITTA_PATRONO=Pordenone .venv/Scripts/python.exe -m pytest -m reale -v -s
+```
+→ 20 passate, 1 xfailed (la catena orologio→calendario senza «oggi»), 292 s. Cinque prove nuove, con un
+database temporaneo (`NOTE_DB` in una cartella temporanea): «Annota che il multimetro MIS-001 ha la
+batteria scarica» → `aggiungi_nota` con `codice` MIS-001 e `testo` «batteria scarica»; «Annota che il
+saldatore va pulito» → `aggiungi_nota` con il solo `testo`; «Quali note ci sono?» → `elenca_note`;
+«Elimina la nota 1» → `elimina_nota` con `numero` 1; «Mostrami le note» → `elenca_note` senza
+cancellazioni. La prima esecuzione era fallita (il modello chiedeva il codice facoltativo e, dopo
+«Annota che…», rispondeva con un testo vuoto): sono state riformulate le descrizioni degli strumenti e
+il grafo richiama il modello con un'istruzione (vedi «Diagnosi»).
+
 ## Diagnosi
+- **`Errore: archivio non avviato: archivio delle note non valido: <percorso> (...)`**: il database
+  delle note non si apre o non ha lo schema atteso (file di un altro programma, percorso in una cartella
+  non scrivibile, `NOTE_DB` sbagliato). Correggere `NOTE_DB` o spostare/cancellare il file (le note
+  vanno perse). Per isolare il problema avviare il server da solo (vedi sopra).
+- **`Errore: archivio delle note non disponibile.`** durante una conversazione: il database è bloccato
+  da oltre 5 secondi, tipicamente perché container e avvio locale sono attivi insieme; chiuderne uno.
 - **`Errore: ... servizio meteo non raggiungibile (...)` o `il servizio meteo non ha risposto entro N secondi`**: manca la connessione a Internet o è
   bloccata (proxy, firewall, rete aziendale); in Docker verificare che il container abbia uscita
   verso Internet. La prova `pytest -m rete -v` isola il problema dal modello.
@@ -363,7 +429,10 @@ $env:PYTHONIOENCODING = "utf-8"
   formulazione; provare `LMSTUDIO_REASONING_EFFORT=low`, accettando tempi molto più lunghi.
 - **`WARNING ... risposta vuota dopo gli strumenti`**: con più strumenti collegati,
   `google/gemma-4-e2b` risponde spesso ai risultati con un testo vuoto. Il programma richiama allora il
-  modello una volta senza strumenti, che produce la risposta. È atteso; se anche la seconda risposta è
+  modello una volta senza strumenti, con in testa un messaggio di sistema («Rispondi all'utente
+  riferendo il risultato degli strumenti.», non salvato nella cronologia), che produce la risposta. Con
+  le note è frequente: in una prova manuale del 2026-11-09 la ripetizione senza l'istruzione era vuota
+  15 volte su 15, con l'istruzione 0 volte su 9. È atteso; se anche la seconda risposta è
   vuota, la CLI mostra `(il modello non ha prodotto una risposta)`.
 - **Input accentato corrotto con una pipe da Git Bash (Windows)**: senza `PYTHONIOENCODING=utf-8`
   la CLI riceve «sarÃ » al posto di «sarà» (osservato il 2026-11-03; con la variabile impostata il
