@@ -3,7 +3,7 @@
 import logging
 from typing import Annotated, Literal, TypedDict
 
-from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
@@ -15,6 +15,7 @@ MESSAGGIO_LIMITE = (
     "Raggiunto il limite di passaggi con gli strumenti: "
     "la richiesta è stata interrotta senza una risposta finale."
 )
+ISTRUZIONE_RISPOSTA = "Rispondi all'utente riferendo il risultato degli strumenti."
 
 
 class Stato(TypedDict):
@@ -66,12 +67,15 @@ def build_graph(llm, strumenti: dict[str, Strumento], max_passaggi: int):
     def modello(stato: Stato) -> dict:
         risposta = llm_con_strumenti.invoke(stato["messaggi"])
         # Con più strumenti collegati alcuni modelli piccoli (gemma-4-e2b) rispondono ai
-        # risultati con un testo vuoto: si richiama una volta il modello senza strumenti.
+        # risultati con un testo vuoto: si richiama una volta il modello senza strumenti, con in
+        # testa un'istruzione di sistema che non entra nello stato né nella cronologia.
         if isinstance(stato["messaggi"][-1], ToolMessage) and _vuota(risposta):
             logger.warning(
                 "risposta vuota dopo gli strumenti: nuova chiamata senza strumenti"
             )
-            risposta = llm.invoke(stato["messaggi"])
+            risposta = llm.invoke(
+                [SystemMessage(ISTRUZIONE_RISPOSTA), *stato["messaggi"]]
+            )
         return {"messaggi": [risposta]}
 
     def esegui_strumenti(stato: Stato) -> dict:

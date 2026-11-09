@@ -2,9 +2,10 @@ import logging
 from datetime import datetime, timezone
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from assistente.grafo import (
+    ISTRUZIONE_RISPOSTA,
     MESSAGGIO_LIMITE,
     _esegui_strumento,
     build_graph,
@@ -266,6 +267,20 @@ def test_risposta_vuota_dopo_strumenti_ripete_senza_strumenti(caplog):
     assert vuote == []
     assert stato["passaggi"] == 1
     assert "risposta vuota dopo gli strumenti" in caplog.text
+
+
+def test_ripetizione_dopo_risposta_vuota_riceve_istruzione_di_sistema():
+    llm = LlmFinto(
+        [richiesta("calcola", {"espressione": "2+2"}), AIMessage(""), AIMessage("Fa 4.")]
+    )
+    stato = esegui(llm)
+    prima, ripetizione = llm.chiamate[1], llm.chiamate[2]
+    assert ISTRUZIONE_RISPOSTA == "Rispondi all'utente riferendo il risultato degli strumenti."
+    assert isinstance(ripetizione[0], SystemMessage)
+    assert ripetizione[0].content == ISTRUZIONE_RISPOSTA
+    assert ripetizione[1:] == prima  # il resto dei messaggi è quello dello stato
+    assert not any(isinstance(m, SystemMessage) for m in llm.chiamate[0] + prima)
+    assert not any(isinstance(m, SystemMessage) for m in stato["messaggi"])
 
 
 def test_risposta_vuota_ripetuta_una_sola_volta():
