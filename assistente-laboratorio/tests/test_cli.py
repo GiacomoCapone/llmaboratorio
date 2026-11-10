@@ -8,18 +8,21 @@ from assistente.config import carica_config
 from assistente.grafo import MESSAGGIO_LIMITE, MESSAGGIO_RIFIUTO, build_graph
 from assistente.mcp_client import ErroreArchivio
 from assistente.strumenti import Strumento, crea_strumenti
-from finti import LlmFinto, RouterFinto, richiesta_ora
+from finti import LlmFinto, RevisoreFinto, RouterFinto, richiesta_ora
 
 ADESSO = lambda: datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)  # noqa: E731
 
 
-def crea_grafo(llm, max_passaggi, router=None):
-    """Grafo con gli strumenti veri e un router simulato (in ambito, se non indicato)."""
+def crea_grafo(llm, max_passaggi, router=None, revisore=None):
+    """Grafo con gli strumenti veri, router e revisore simulati (in ambito e approvato, se
+    non indicati)."""
     return build_graph(
         llm,
         crea_strumenti(ADESSO, "Europe/Rome"),
         max_passaggi,
         router or RouterFinto("conversazione"),
+        revisore or RevisoreFinto([True]),
+        2,
     )
 
 
@@ -185,9 +188,10 @@ def test_main_passa_gli_strumenti_dell_archivio(monkeypatch):
     monkeypatch.setattr("assistente.cli.verifica_modello", lambda config: None)
     monkeypatch.setattr("assistente.cli.crea_llm", lambda config: None)
     monkeypatch.setattr("assistente.cli.crea_router", lambda llm, ambito: None)
+    monkeypatch.setattr("assistente.cli.crea_revisore", lambda llm: None)
     nomi = []
 
-    def grafo_finto(llm, strumenti, max_passaggi, router):
+    def grafo_finto(llm, strumenti, max_passaggi, router, revisore, max_revisioni):
         nomi.extend(strumenti)
         raise KeyboardInterrupt
 
@@ -273,13 +277,73 @@ def test_main_passa_il_router(monkeypatch):
         ricevuti.update(llm=llm, ambito=ambito)
         return router_finto
 
-    def grafo_finto(llm, strumenti, max_passaggi, router):
+    def grafo_finto(llm, strumenti, max_passaggi, router, revisore, max_revisioni):
         ricevuti["router"] = router
         raise KeyboardInterrupt
 
     monkeypatch.setattr("assistente.cli.crea_router", crea_router_finto)
+    monkeypatch.setattr("assistente.cli.crea_revisore", lambda llm: None)
     monkeypatch.setattr("assistente.cli.build_graph", grafo_finto)
     assert main() == 130
     assert ricevuti["llm"] is llm_finto
     assert ricevuti["ambito"] == carica_config().ambito
     assert ricevuti["router"] is router_finto
+
+
+class GrafoCheRegistra:
+    """Grafo finto: registra lo stato iniziale e risponde con una risposta fissa."""
+
+    def __init__(self):
+        self.stati = []
+
+    def invoke(self, stato):
+        self.stati.append(stato)
+        return {**stato, "messaggi": stato["messaggi"] + [AIMessage("ok")]}
+
+
+def test_esegui_turno_azzera_la_revisione():
+    grafo = GrafoCheRegistra()
+    esegui_turno(grafo, [], "ciao")
+    stato = grafo.stati[0]
+    assert stato["revisioni"] == 0
+    assert stato["scartati"] == []
+    assert stato["esito_revisione"] == ""
+
+
+def test_turno_dopo_revisione_cronologia_pulita():
+    llm = LlmFinto([AIMessage("bozza"), AIMessage("finale"), AIMessage("secondo")])
+    revisore = RevisoreFinto([False, True, True])
+    grafo = crea_grafo(llm, 5, revisore=revisore)
+    primo = esegui_turno(grafo, [], "domanda uno")
+    assert [m.content for m in primo.cronologia] == ["domanda uno", "finale"]
+    esegui_turno(grafo, primo.cronologia, "domanda due")
+    for messaggi in [llm.chiamate[-1], revisore.chiamate[-1]]:
+        testi = unisci_testo(messaggi)
+        assert "bozza" not in testi
+        assert "Indicazione del revisore" not in testi
+
+
+def test_main_passa_il_revisore(monkeypatch):
+    imposta_env(monkeypatch)
+    monkeypatch.setattr("assistente.cli.ClientArchivio", lambda **kwargs: ArchivioFinto())
+    monkeypatch.setattr("assistente.cli.verifica_modello", lambda config: None)
+    llm_finto = object()
+    monkeypatch.setattr("assistente.cli.crea_llm", lambda config: llm_finto)
+    monkeypatch.setattr("assistente.cli.crea_router", lambda llm, ambito: None)
+    revisore_finto = object()
+    ricevuti = {}
+
+    def crea_revisore_finto(llm):
+        ricevuti["llm"] = llm
+        return revisore_finto
+
+    def grafo_finto(llm, strumenti, max_passaggi, router, revisore, max_revisioni):
+        ricevuti.update(revisore=revisore, max_revisioni=max_revisioni)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("assistente.cli.crea_revisore", crea_revisore_finto)
+    monkeypatch.setattr("assistente.cli.build_graph", grafo_finto)
+    assert main() == 130
+    assert ricevuti["llm"] is llm_finto
+    assert ricevuti["revisore"] is revisore_finto
+    assert ricevuti["max_revisioni"] == carica_config().max_revisioni

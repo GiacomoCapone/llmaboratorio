@@ -22,6 +22,7 @@ from archivio.note import apri
 from assistente.grafo import build_graph
 from assistente.mcp_client import ClientArchivio
 from assistente.modello import crea_llm, verifica_modello
+from assistente.revisore import crea_revisore
 from assistente.router import crea_router
 from assistente.strumenti import crea_strumenti
 
@@ -53,12 +54,24 @@ def esegui_domanda(
             ),
             config.max_passaggi,
             crea_router(llm, config.ambito),
+            crea_revisore(llm),
+            config.max_revisioni,
         )
-        with caplog.at_level(logging.INFO, logger="assistente.grafo"):
+        with caplog.at_level(logging.INFO, logger="assistente"):
             stato = grafo.invoke(
-                {"messaggi": [HumanMessage(domanda)], "passaggi": 0, "interrotto": False}
+                {
+                    "messaggi": [HumanMessage(domanda)],
+                    "passaggi": 0,
+                    "interrotto": False,
+                    "revisioni": 0,
+                    "scartati": [],
+                    "esito_revisione": "",
+                }
             )
-    print(f"\n[{domanda!r}] turno completato in {time.perf_counter() - inizio:.1f} s")
+    print(
+        f"\n[{domanda!r}] turno completato in {time.perf_counter() - inizio:.1f} s"
+        f" (revisioni: {stato.get('revisioni', 0)})"
+    )
     assert stato["categoria"] == categoria_attesa, stato["motivo"]
     assert not stato["interrotto"], "limite di passaggi raggiunto"
     assert str(stato["messaggi"][-1].content).strip()
@@ -347,3 +360,92 @@ def test_router_rifiuta_fuori_ambito(caplog):
     assert str(stato["messaggi"][-1].content).startswith("Posso rispondere solo")
     assert "router categoria=fuori_ambito" in caplog.text
     assert "agente:" not in caplog.text
+
+
+DUE_PARTI = "Che ore sono a Tokyo e quanto fa 12 * 4?"
+
+
+def valuta_risposta(risposta, caplog, domanda=DUE_PARTI):
+    config = carica_config()
+    verifica_modello(config)
+    with caplog.at_level(logging.WARNING, logger="assistente.revisore"):
+        valutazione = crea_revisore(crea_llm(config))(
+            [HumanMessage(domanda), AIMessage(risposta)]
+        )
+    print(f"\n[{risposta!r}] coerente={valutazione.coerente} motivo={valutazione.motivo!r}")
+    assert "revisore non disponibile" not in caplog.text
+    return valutazione
+
+
+def test_revisore_rifiuta_risposta_parziale(caplog):
+    # Risposta parziale costruita a mano: il modello vero non si può costringere a rispondere a metà.
+    valutazione = valuta_risposta("A Tokyo sono le 21:00.", caplog)
+    assert valutazione.coerente is False
+    assert valutazione.motivo.strip()
+
+
+def test_revisore_approva_risposta_completa(caplog):
+    valutazione = valuta_risposta("A Tokyo sono le 21:00 e 12 * 4 fa 48.", caplog)
+    assert valutazione.coerente is True
+
+
+# Risposte corrette a una sola richiesta che il primo revisore (giudizio diretto coerente sì/no)
+# rifiutava sempre: vedi la specifica del revisore, «Revisione del 2026-11-10».
+RISPOSTE_A_UNA_RICHIESTA = [
+    ("Che ore sono a Tokyo?",
+     "La data e l'ora attuali a Tokyo sono 2026-11-10T17:28:39.936095+09:00."),
+    ("Quanti giorni lavorativi ci sono dal 1° al 31 dicembre 2026?",
+     "I giorni lavorativi dal 1° al 31 dicembre 2026 sono **20**."),
+    ("Che cosa c'è fra gli strumenti di misura?",
+     "La categoria \"strumenti di misura\" contiene i seguenti articoli:\n"
+     "* **MIS-001**: Multimetro digitale (4 pezzi) - Collocazione: Armadio A, ripiano 2\n"
+     "* **MIS-002**: Oscilloscopio digitale (2 pezzi) - Collocazione: Bancone 3\n"
+     "* **MIS-003**: Pinza amperometrica (1 pezzo) - Collocazione: Armadio A, ripiano 2\n"
+     "* **MIS-004**: Analizzatore logico (0 pezzi) - Collocazione: Armadio A, ripiano 3"),
+    ("Quali note ci sono?", "Il risultato dell'azione è che **non ci sono note**."),
+    ("Che tempo farà domani a Trieste?",
+     "Mi dispiace, ma non ho accesso alle previsioni meteorologiche future. Posso solo fornirti"
+     " le condizioni meteo attuali di Trieste."),
+    ("Che giorno sarà fra 30 giorni?",
+     "Per calcolarlo mi serve la data di partenza: da quale giorno vuoi contare?"),
+]
+
+
+# Osservazioni, non vincoli: con gemma-4-e2b il verdetto su queste risposte cambia da una
+# sessione all'altra (ragionamento nascosto di 200-300 token); i rifiuti restano vincolanti.
+# xfail imperativo dopo valuta_risposta: un «revisore non disponibile» resta un fallimento vero.
+INSTABILE = (
+    "limite noto: verdetto instabile fra sessioni su risposte corrette a una richiesta"
+    " (specifica del revisore, «Revisione del 2026-11-10»)"
+)
+SEGUITO = (
+    "limite noto: gemma-4-e2b non ricollega una domanda di seguito ai messaggi precedenti"
+    " e la giudica senza risposta (specifica del revisore, «Revisione del 2026-11-10»)"
+)
+
+
+@pytest.mark.parametrize("domanda, risposta", RISPOSTE_A_UNA_RICHIESTA)
+def test_revisore_approva_risposta_a_una_richiesta(caplog, domanda, risposta):
+    if not valuta_risposta(risposta, caplog, domanda).coerente:
+        pytest.xfail(INSTABILE)
+
+
+def test_revisore_approva_risposta_di_seguito(caplog):
+    config = carica_config()
+    verifica_modello(config)
+    with caplog.at_level(logging.WARNING, logger="assistente.revisore"):
+        valutazione = crea_revisore(crea_llm(config))(
+            [HumanMessage("Che ore sono a Roma?"), AIMessage("A Roma sono le 13:00."),
+             HumanMessage("e a Londra?"), AIMessage("A Londra sono le 12:00.")]
+        )
+    print(f"\n[seguito] coerente={valutazione.coerente} motivo={valutazione.motivo!r}")
+    assert "revisore non disponibile" not in caplog.text
+    if not valutazione.coerente:
+        pytest.xfail(SEGUITO)
+
+
+def test_revisore_rifiuta_risposta_fuori_tema(caplog):
+    valutazione = valuta_risposta(
+        "Il calcio è uno sport molto popolare in Italia.", caplog, "Dove si trova il multimetro?"
+    )
+    assert valutazione.coerente is False

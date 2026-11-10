@@ -2,6 +2,7 @@
 
 from langchain_core.messages import AIMessage
 
+from assistente.revisore import Valutazione
 from assistente.router import Classificazione
 from assistente.strumenti.orologio import NOME_ORA_CORRENTE
 
@@ -61,6 +62,20 @@ class RouterFinto:
         indice = min(len(self.chiamate), len(self.categorie) - 1)
         self.chiamate.append(list(messaggi))
         return Classificazione(categoria=self.categorie[indice], motivo=self.motivo)
+
+
+class RevisoreFinto:
+    """Revisore simulato: restituisce gli esiti indicati (l'ultimo si ripete)."""
+
+    def __init__(self, esiti: list[bool], motivo: str = "motivo di prova"):
+        self.esiti = list(esiti)
+        self.motivo = motivo
+        self.chiamate: list[list] = []
+
+    def __call__(self, messaggi) -> Valutazione:
+        indice = min(len(self.chiamate), len(self.esiti) - 1)
+        self.chiamate.append(list(messaggi))
+        return Valutazione(coerente=self.esiti[indice], motivo=self.motivo)
 
 
 def richiesta(nome: str, args, id: str = "c1") -> AIMessage:

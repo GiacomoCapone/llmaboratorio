@@ -36,6 +36,7 @@ class Config:
     citta_patrono: str | None = None
     note_db: Path = NOTE_DB_PREDEFINITO
     ambito: str = ""
+    max_revisioni: int = 2
 
 
 def _obbligatoria(env: Mapping[str, str], nome: str) -> str:
@@ -119,6 +120,16 @@ def carica_config(env: Mapping[str, str] | None = None) -> Config:
 
     ambito = _leggi_ambito(env.get("AMBITO_FILE", "").strip())
 
+    grezzo_revisioni = env.get("MAX_REVISIONI", "2")
+    try:
+        max_revisioni = int(grezzo_revisioni.strip())
+    except ValueError:
+        max_revisioni = 0
+    if max_revisioni < 1:
+        raise ErroreConfigurazione(
+            f"MAX_REVISIONI deve essere un intero positivo, trovato {grezzo_revisioni!r}."
+        )
+
     return Config(
         base_url,
         model,
@@ -129,4 +140,5 @@ def carica_config(env: Mapping[str, str] | None = None) -> Config:
         citta_patrono,
         note_db,
         ambito,
+        max_revisioni,
     )

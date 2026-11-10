@@ -3,11 +3,20 @@
 import logging
 from collections.abc import Callable
 from typing import Annotated, Literal, TypedDict
+from uuid import uuid4
 
-from langchain_core.messages import AIMessage, AnyMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    AnyMessage,
+    HumanMessage,
+    RemoveMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
+from assistente.revisore import Valutazione
 from assistente.router import Classificazione
 from assistente.strumenti import Strumento
 
@@ -21,6 +30,13 @@ ISTRUZIONE_RISPOSTA = "Rispondi all'utente riferendo il risultato degli strument
 MESSAGGIO_RIFIUTO = (
     "Posso rispondere solo a domande sul laboratorio e sui suoi strumenti. Motivo: {motivo}"
 )
+# L'utente non vede né la bozza scartata né l'indicazione: senza il divieto l'agente apriva
+# con «Mi scuso per la risposta precedente».
+INDICAZIONE_REVISORE = (
+    "Indicazione del revisore (l'utente non la vede): la risposta precedente non è adeguata. "
+    "Motivo: {motivo}. Scrivi una nuova risposta completa alla domanda dell'utente, senza "
+    "citare la risposta precedente né questa indicazione."
+)
 
 
 class Stato(TypedDict):
@@ -29,6 +45,14 @@ class Stato(TypedDict):
     interrotto: bool
     categoria: str  # scritti dal nodo router
     motivo: str
+    revisioni: int  # volte in cui la risposta è tornata all'agente nel turno
+    scartati: list[str]  # id di bozze rifiutate e indicazioni, rimossi a fine turno
+    esito_revisione: str  # "agente" | "fine", scritto dal nodo revisore
+
+
+def instrada_dopo_revisore(stato: Stato) -> Literal["agente", "fine"]:
+    """Segue la decisione del nodo revisore (che applica il limite di revisioni)."""
+    return "agente" if stato["esito_revisione"] == "agente" else "fine"
 
 
 def instrada_dopo_router(stato: Stato) -> Literal["agente", "rifiuto"]:
@@ -77,8 +101,10 @@ def build_graph(
     strumenti: dict[str, Strumento],
     max_passaggi: int,
     router: Callable[[list[AnyMessage]], Classificazione],
+    revisore: Callable[[list[AnyMessage]], Valutazione],
+    max_revisioni: int,
 ):
-    """Costruisce e compila il grafo router / rifiuto / modello / strumenti / limite."""
+    """Costruisce e compila il grafo router / rifiuto / modello / strumenti / limite / revisore."""
     llm_con_strumenti = llm.bind_tools([s.definizione for s in strumenti.values()])
 
     def nodo_router(stato: Stato) -> dict:
@@ -91,6 +117,43 @@ def build_graph(
 
     def rifiuto(stato: Stato) -> dict:
         return {"messaggi": [AIMessage(MESSAGGIO_RIFIUTO.format(motivo=stato["motivo"]))]}
+
+    def nodo_revisore(stato: Stato) -> dict:
+        scartati = list(stato.get("scartati") or [])
+        revisioni = stato.get("revisioni", 0)
+        valutazione = revisore([m for m in stato["messaggi"] if m.id not in scartati])
+        if not valutazione.coerente and revisioni < max_revisioni:
+            revisioni += 1
+            logger.info(
+                "revisore coerente=no motivo=%s → agente (revisione %d/%d)",
+                valutazione.motivo,
+                revisioni,
+                max_revisioni,
+            )
+            indicazione = HumanMessage(
+                INDICAZIONE_REVISORE.format(motivo=valutazione.motivo), id=str(uuid4())
+            )
+            return {
+                "messaggi": [indicazione],
+                "scartati": [*scartati, stato["messaggi"][-1].id, indicazione.id],
+                "revisioni": revisioni,
+                "esito_revisione": "agente",
+            }
+        logger.info(
+            "revisore coerente=%s motivo=%s → fine",
+            "sì" if valutazione.coerente else "no",
+            valutazione.motivo,
+        )
+        if not valutazione.coerente:
+            logger.warning(
+                "limite di revisioni raggiunto (%d): restituita l'ultima risposta", max_revisioni
+            )
+        # La cronologia conserva domanda, strumenti e risposta finale: bozze e indicazioni no.
+        return {
+            "messaggi": [RemoveMessage(id=i) for i in scartati],
+            "scartati": [],
+            "esito_revisione": "fine",
+        }
 
     def modello(stato: Stato) -> dict:
         logger.info("agente: chiamata al modello")
@@ -148,6 +211,7 @@ def build_graph(
     grafo.add_node("modello", modello)
     grafo.add_node("strumenti", esegui_strumenti)
     grafo.add_node("limite", limite)
+    grafo.add_node("revisore", nodo_revisore)
     grafo.add_edge(START, "router")
     grafo.add_conditional_edges(
         "router", instrada_dopo_router, {"agente": "modello", "rifiuto": "rifiuto"}
@@ -156,8 +220,13 @@ def build_graph(
     grafo.add_conditional_edges(
         "modello",
         lambda stato: instrada_dopo_modello(stato, max_passaggi),
-        {"strumenti": "strumenti", "limite": "limite", "fine": END},
+        {"strumenti": "strumenti", "limite": "limite", "fine": "revisore"},
+    )
+    grafo.add_conditional_edges(
+        "revisore", instrada_dopo_revisore, {"agente": "modello", "fine": END}
     )
     grafo.add_edge("strumenti", "modello")
     grafo.add_edge("limite", END)
-    return grafo.compile().with_config(recursion_limit=max_passaggi * 2 + 12)
+    return grafo.compile().with_config(
+        recursion_limit=max_passaggi * 2 + 12 + 2 * (max_revisioni + 1)
+    )

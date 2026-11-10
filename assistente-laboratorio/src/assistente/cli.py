@@ -12,6 +12,7 @@ from assistente.config import ErroreConfigurazione, carica_config
 from assistente.grafo import build_graph
 from assistente.mcp_client import ClientArchivio, ErroreArchivio
 from assistente.modello import ErroreModello, crea_llm, verifica_modello
+from assistente.revisore import crea_revisore
 from assistente.router import crea_router
 from assistente.strumenti import crea_strumenti
 
@@ -36,6 +37,9 @@ def esegui_turno(grafo, cronologia: list[BaseMessage], domanda: str) -> EsitoTur
             "messaggi": cronologia + [HumanMessage(domanda)],
             "passaggi": 0,
             "interrotto": False,
+            "revisioni": 0,
+            "scartati": [],
+            "esito_revisione": "",
         }
     )
     messaggi = stato["messaggi"]
@@ -94,7 +98,12 @@ def main() -> int:
             )
             llm = crea_llm(config)
             grafo = build_graph(
-                llm, strumenti, config.max_passaggi, crea_router(llm, config.ambito)
+                llm,
+                strumenti,
+                config.max_passaggi,
+                crea_router(llm, config.ambito),
+                crea_revisore(llm),
+                config.max_revisioni,
             )
             print("Assistente del laboratorio. Scrivere 'esci' per terminare.")
             ciclo(grafo, lambda: input("> "), print)

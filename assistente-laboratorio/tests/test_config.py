@@ -214,3 +214,19 @@ def test_ambito_con_bom(tmp_path):
     percorso = tmp_path / "bom.txt"
     percorso.write_text("Ambito\n\n", encoding="utf-8-sig")
     assert carica_config({**BASE, "AMBITO_FILE": str(percorso)}).ambito == "Ambito"
+
+
+def test_max_revisioni_predefinito():
+    assert carica_config(BASE).max_revisioni == 2
+
+
+@pytest.mark.parametrize("valore, atteso", [("3", 3), (" 3 ", 3), ("1", 1)])
+def test_max_revisioni_esplicito(valore, atteso):
+    assert carica_config({**BASE, "MAX_REVISIONI": valore}).max_revisioni == atteso
+
+
+@pytest.mark.parametrize("valore", ["0", "-1", "abc", "1.5"])
+def test_max_revisioni_non_valido(valore):
+    with pytest.raises(ErroreConfigurazione) as errore:
+        carica_config({**BASE, "MAX_REVISIONI": valore})
+    assert "MAX_REVISIONI" in str(errore.value)

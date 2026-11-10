@@ -44,8 +44,8 @@ Variabili: `LMSTUDIO_BASE_URL` (default nell'esempio `http://localhost:1234/v1`)
 `FUSO_PREDEFINITO` (default `Europe/Rome`, nome IANA), `CITTA_PATRONO` (facoltativa, per esempio
 `Pordenone`), `NOTE_DB` (facoltativa, percorso del database delle note; vedi «Note del laboratorio») e
 `AMBITO_FILE` (facoltativa, file che descrive l'ambito del router; default `ambito.txt`, vedi «Ambito e
-router»). Un valore non ammesso per `LMSTUDIO_REASONING_EFFORT` o `FUSO_PREDEFINITO`, o una città
-non presente in `src/assistente/strumenti/festivita.json`, ferma l'avvio con un errore (uscita 1). Per
+router») e `MAX_REVISIONI` (default 2, intero ≥ 1; vedi «Revisore delle risposte»). Un valore non
+ammesso per `LMSTUDIO_REASONING_EFFORT` o `FUSO_PREDEFINITO`, o una città non presente in `src/assistente/strumenti/festivita.json`, ferma l'avvio con un errore (uscita 1). Per
 una città sconosciuta il messaggio è `Città del patrono sconosciuta: '<valore>'. Città disponibili: ...
 (file ...)`; verificato il 2026-11-03 con `CITTA_PATRONO=Milano` (uscita 1).
 
@@ -116,6 +116,56 @@ Il router chiede la classificazione tramite uno strumento obbligatorio (`tool_ch
 al massimo 256 token in uscita). Non usa `response_format` con schema JSON: con lo schema LM Studio
 ignora `LMSTUDIO_REASONING_EFFORT=none` e `google/gemma-4-e2b` ragiona per migliaia di token (misurati
 fino a 688 s per una sola classificazione, contro circa 3 s con lo strumento obbligatorio).
+
+## Revisore delle risposte
+Prima di arrivare all'utente, ogni risposta finale dell'agente passa da un nodo **revisore** (stesso modello,
+prompt diverso), che controlla se tratta tutte le parti della domanda. Il modello chiama lo strumento
+obbligatorio `Giudizio` elencando le `richieste` della domanda e quelle `mancanti` (senza risposta o con
+una risposta che parla d'altro); la risposta è coerente se non manca nulla, e lo decide il programma.
+Il motivo nei log è `richieste trattate: ...` oppure `manca la risposta a: ...`; una risposta vuota
+torna all'agente senza chiamare il modello (motivo `risposta vuota`). Non verifica l'esattezza
+dei dati: non vede i risultati degli strumenti.
+
+```
+… modello ⇄ strumenti / limite
+      ↓ risposta finale
+   revisore ─┬─ coerente → END
+             ├─ non coerente, revisioni < MAX_REVISIONI → modello (con l'indicazione del revisore)
+             └─ non coerente, limite raggiunto → END (ultima risposta)
+```
+
+Se la risposta non è coerente, il motivo torna all'agente come messaggio «Indicazione del revisore: ...»
+e l'agente risponde di nuovo. `MAX_REVISIONI` (default 2) è il numero massimo di ritorni all'agente: con 2
+l'agente risponde al massimo 3 volte; al limite l'utente riceve l'ultima risposta. A fine turno bozze
+scartate e indicazioni sono tolte dalla cronologia (restano nei log): i turni successivi vedono solo
+domanda, strumenti e risposta finale. Il revisore non interviene sul rifiuto del router né al limite dei
+passaggi con gli strumenti. Ogni revisione aggiunge due chiamate al modello (revisore e agente).
+
+Righe di log (`LOG_LEVEL=INFO`) da cercare:
+- approvata: `revisore coerente=sì motivo=... → fine`;
+- rimandata: `revisore coerente=no motivo=... → agente (revisione 1/2)` seguita da
+  `agente: chiamata al modello`;
+- limite: `revisore coerente=no motivo=... → fine` e
+  `WARNING ... limite di revisioni raggiunto (2): restituita l'ultima risposta`.
+
+Il revisore riceve domanda, risposta proposta e fino a due messaggi precedenti come testo in un solo
+messaggio utente: con l'ultimo messaggio dell'assistente e lo strumento obbligatorio LM Studio risponde
+`400 ... Unexpected empty grammar stack`. Il limite è di 1024 token in uscita: nonostante
+`LMSTUDIO_REASONING_EFFORT=none`, `google/gemma-4-e2b` a volte ragiona fino a circa 300 token prima
+della tool call (con 256 la valutazione veniva troncata); una valutazione dura circa 7–15 s.
+
+Scelte misurate con `google/gemma-4-e2b` (specifica del revisore, «Revisione del 2026-11-10»): un
+giudizio diretto «coerente sì/no» rifiutava risposte corrette (ora come timestamp, «quali festività?»);
+lo schema `richieste`/`mancanti` le approva e rifiuta quelle parziali o fuori tema.
+**Limiti noti:**
+- una domanda di seguito («Che ore sono a Roma?» … «e a Londra?») è giudicata senza risposta anche
+  quando la risposta è corretta, quindi può tornare all'agente fino a `MAX_REVISIONI` volte (prova reale
+  `test_revisore_approva_risposta_di_seguito`, segnata `xfail`);
+- il verdetto su risposte corrette a una sola richiesta (elenchi, «non ci sono note», «non ho accesso
+  alle previsioni», «mi serve la data») cambia da una sessione di LM Studio all'altra: il modello ragiona
+  in modo nascosto prima del giudizio. Le prove reali di approvazione
+  (`test_revisore_approva_risposta_a_una_richiesta`) sono quindi osservazioni (`xfail` non stretto);
+  restano vincolanti il rifiuto di risposte parziali e fuori tema e l'approvazione di quella completa.
 
 ## Strumenti
 Il modello li richiede tramite tool calling; il programma li esegue davvero (registro in
@@ -416,6 +466,12 @@ cancellazioni. La prima esecuzione era fallita (il modello chiedeva il codice fa
 il grafo richiama il modello con un'istruzione (vedi «Diagnosi»).
 
 ## Diagnosi
+- **`WARNING assistente.revisore revisore non disponibile: ...`**: la valutazione non è riuscita; la
+  risposta è approvata comunque e arriva all'utente; il motivo segue i due punti.
+- **`WARNING ... limite di revisioni raggiunto` frequente**: il modello non riesce a completare la
+  risposta (domanda con troppe parti o ambigua, modello piccolo) oppure, con una domanda di seguito
+  («e a Londra?»), il revisore rifiuta a torto (limite noto); la risposta resta l'ultima prodotta.
+  Ogni revisione allunga il turno; `MAX_REVISIONI=1` lo accorcia.
 - **`WARNING assistente.router router non disponibile: ...`**: la classificazione non è riuscita
   (server non raggiungibile, risposta senza tool call, argomenti non validi, limite di 256 token). La
   domanda passa comunque all'agente come `conversazione`; il motivo segue i due punti.

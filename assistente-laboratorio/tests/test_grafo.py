@@ -7,27 +7,50 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from assistente.grafo import (
     ISTRUZIONE_RISPOSTA,
     MESSAGGIO_LIMITE,
+    INDICAZIONE_REVISORE,
     MESSAGGIO_RIFIUTO,
     _esegui_strumento,
     build_graph,
     instrada_dopo_modello,
+    instrada_dopo_revisore,
     instrada_dopo_router,
 )
 from assistente.strumenti import Strumento, crea_strumenti
-from finti import LlmFinto, RouterFinto, richiesta, richiesta_malformata, richiesta_ora
+from finti import LlmFinto, RevisoreFinto, RouterFinto, richiesta, richiesta_malformata, richiesta_ora
 
 ADESSO = lambda: datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)  # noqa: E731
 
 
-def esegui(llm, max_passaggi=5, testo="Che ore sono?", strumenti=None, router=None):
+def esegui(
+    llm,
+    max_passaggi=5,
+    testo="Che ore sono?",
+    strumenti=None,
+    router=None,
+    revisore=None,
+    max_revisioni=2,
+):
     if strumenti is None:
         strumenti = crea_strumenti(ADESSO, "Europe/Rome")
     if router is None:
         router = RouterFinto("conversazione")
-    grafo = build_graph(llm, strumenti, max_passaggi, router)
+    if revisore is None:
+        revisore = RevisoreFinto([True])
+    grafo = build_graph(llm, strumenti, max_passaggi, router, revisore, max_revisioni)
     return grafo.invoke(
-        {"messaggi": [HumanMessage(testo)], "passaggi": 0, "interrotto": False}
+        {
+            "messaggi": [HumanMessage(testo)],
+            "passaggi": 0,
+            "interrotto": False,
+            "revisioni": 0,
+            "scartati": [],
+            "esito_revisione": "",
+        }
     )
+
+
+def contenuti(stato):
+    return [m.content for m in stato["messaggi"]]
 
 
 def tool_messages(stato):
@@ -369,3 +392,115 @@ def test_router_riceve_la_cronologia():
 )
 def test_instradamento_dopo_router(categoria, atteso):
     assert instrada_dopo_router({"categoria": categoria}) == atteso
+
+
+DUE_PARTI = "Che ore sono a Tokyo e quanto fa 12 * 4?"
+
+
+def test_revisore_rimanda_risposta_parziale(caplog):
+    llm = LlmFinto(
+        [AIMessage("A Tokyo sono le 21."), AIMessage("A Tokyo sono le 21; 12 * 4 fa 48.")]
+    )
+    revisore = RevisoreFinto([False, True], motivo="manca il calcolo")
+    with caplog.at_level(logging.INFO, logger="assistente.grafo"):
+        stato = esegui(llm, testo=DUE_PARTI, revisore=revisore)
+    assert len(llm.chiamate) == 2
+    indicazione = INDICAZIONE_REVISORE.format(motivo="manca il calcolo")
+    assert llm.chiamate[1][-1].content == indicazione
+    assert "revisore coerente=no motivo=manca il calcolo → agente (revisione 1/2)" in caplog.text
+    assert "revisore coerente=sì motivo=manca il calcolo → fine" in caplog.text
+    assert contenuti(stato) == [DUE_PARTI, "A Tokyo sono le 21; 12 * 4 fa 48."]
+
+
+def test_revisore_approva_al_primo_passaggio(caplog):
+    llm = LlmFinto([AIMessage("Sono le 13.")])
+    with caplog.at_level(logging.INFO, logger="assistente.grafo"):
+        stato = esegui(llm)
+    assert len(llm.chiamate) == 1
+    assert "revisore coerente=sì motivo=motivo di prova → fine" in caplog.text
+    assert stato["revisioni"] == 0
+    assert contenuti(stato) == ["Che ore sono?", "Sono le 13."]
+
+
+def test_limite_di_revisioni(caplog):
+    llm = LlmFinto([AIMessage("r1"), AIMessage("r2"), AIMessage("r3")])
+    with caplog.at_level(logging.INFO, logger="assistente.grafo"):
+        stato = esegui(llm, revisore=RevisoreFinto([False]), max_revisioni=2)
+    assert len(llm.chiamate) == 3
+    assert contenuti(stato) == ["Che ore sono?", "r3"]
+    assert "limite di revisioni raggiunto (2): restituita l'ultima risposta" in caplog.text
+    assert any(
+        r.levelno == logging.WARNING and "limite di revisioni" in r.getMessage()
+        for r in caplog.records
+    )
+    assert stato["interrotto"] is False
+
+
+def test_revisore_non_vede_bozze_scartate():
+    revisore = RevisoreFinto([False, True])
+    esegui(LlmFinto([AIMessage("bozza"), AIMessage("finale")]), revisore=revisore)
+    secondi = [m.content for m in revisore.chiamate[1]]
+    assert "bozza" not in secondi
+    assert not any(str(c).startswith("Indicazione del revisore") for c in secondi)
+    assert secondi[-1] == "finale"
+
+
+def test_revisione_dopo_strumenti_mantiene_le_coppie():
+    llm = LlmFinto([richiesta_ora("Asia/Tokyo"), AIMessage("bozza"), AIMessage("finale")])
+    stato = esegui(llm, revisore=RevisoreFinto([False, True]))
+    chiamate = [m for m in stato["messaggi"] if getattr(m, "tool_calls", None)]
+    assert len(chiamate) == 1 and len(tool_messages(stato)) == 1
+    assert tool_messages(stato)[0].tool_call_id == chiamate[0].tool_calls[0]["id"]
+    assert "bozza" not in contenuti(stato)
+    assert stato["messaggi"][-1].content == "finale"
+
+
+def test_risposta_vuota_passa_dal_revisore():
+    revisore = RevisoreFinto([True])
+    esegui(LlmFinto([AIMessage("")]), revisore=revisore)
+    assert len(revisore.chiamate) == 1
+
+
+def test_motivo_con_graffe():
+    llm = LlmFinto([AIMessage("bozza"), AIMessage("finale")])
+    esegui(llm, revisore=RevisoreFinto([False, True], motivo="manca {x}"))
+    assert "manca {x}" in llm.chiamate[1][-1].content
+
+
+def test_indicazione_non_cita_la_risposta_precedente():
+    # L'utente non vede la bozza scartata: l'agente non deve scusarsi per essa.
+    assert INDICAZIONE_REVISORE.startswith("Indicazione del revisore")
+    assert "senza citare la risposta precedente" in INDICAZIONE_REVISORE
+
+
+def test_revisore_non_esegue_dopo_rifiuto_del_router():
+    revisore = RevisoreFinto([True])
+    esegui(LlmFinto([]), router=RouterFinto("fuori_ambito"), revisore=revisore)
+    assert revisore.chiamate == []
+
+
+def test_revisore_non_esegue_al_limite_dei_passaggi():
+    revisore = RevisoreFinto([True])
+    llm = LlmFinto([richiesta_ora("UTC")], ripeti_ultima=True)
+    stato = esegui(llm, max_passaggi=2, revisore=revisore)
+    assert stato["interrotto"] is True
+    assert revisore.chiamate == []
+
+
+@pytest.mark.parametrize("esito", ["agente", "fine"])
+def test_instradamento_dopo_revisore(esito):
+    assert instrada_dopo_revisore({"esito_revisione": esito}) == esito
+
+
+def test_risposta_vuota_rimandata_dal_revisore_vero(caplog):
+    from assistente.revisore import crea_revisore
+
+    valutatore = LlmFinto(
+        [richiesta("Giudizio", {"richieste": ["Che ore sono?"], "mancanti": []})]
+    )
+    llm = LlmFinto([AIMessage(""), AIMessage("Sono le 12.")])
+    with caplog.at_level(logging.INFO, logger="assistente.grafo"):
+        stato = esegui(llm, revisore=crea_revisore(valutatore))
+    assert "revisore coerente=no motivo=risposta vuota → agente (revisione 1/2)" in caplog.text
+    assert len(valutatore.chiamate) == 1  # solo la seconda risposta va al modello
+    assert [m.content for m in stato["messaggi"]] == ["Che ore sono?", "Sono le 12."]
