@@ -44,7 +44,8 @@ Variabili: `LMSTUDIO_BASE_URL` (default nell'esempio `http://localhost:1234/v1`)
 `FUSO_PREDEFINITO` (default `Europe/Rome`, nome IANA), `CITTA_PATRONO` (facoltativa, per esempio
 `Pordenone`), `NOTE_DB` (facoltativa, percorso del database delle note; vedi «Note del laboratorio») e
 `AMBITO_FILE` (facoltativa, file che descrive l'ambito del router; default `ambito.txt`, vedi «Ambito e
-router») e `MAX_REVISIONI` (default 2, intero ≥ 1; vedi «Revisore delle risposte»). Un valore non
+router»), `MAX_REVISIONI` (default 2, intero ≥ 1; vedi «Revisore delle risposte») e
+`RIASSUNTO_SOGLIA_TOKEN` (default 3000, intero ≥ 1; vedi «Riassunto della cronologia»). Un valore non
 ammesso per `LMSTUDIO_REASONING_EFFORT` o `FUSO_PREDEFINITO`, o una città non presente in `src/assistente/strumenti/festivita.json`, ferma l'avvio con un errore (uscita 1). Per
 una città sconosciuta il messaggio è `Città del patrono sconosciuta: '<valore>'. Città disponibili: ...
 (file ...)`; verificato il 2026-11-03 con `CITTA_PATRONO=Milano` (uscita 1).
@@ -164,8 +165,45 @@ lo schema `richieste`/`mancanti` le approva e rifiuta quelle parziali o fuori te
 - il verdetto su risposte corrette a una sola richiesta (elenchi, «non ci sono note», «non ho accesso
   alle previsioni», «mi serve la data») cambia da una sessione di LM Studio all'altra: il modello ragiona
   in modo nascosto prima del giudizio. Le prove reali di approvazione
-  (`test_revisore_approva_risposta_a_una_richiesta`) sono quindi osservazioni (`xfail` non stretto);
-  restano vincolanti il rifiuto di risposte parziali e fuori tema e l'approvazione di quella completa.
+  (`test_revisore_approva_risposta_a_una_richiesta`) sono quindi osservazioni (`pytest.xfail` quando il
+  verdetto è sbagliato); restano vincolanti il rifiuto di risposte parziali e fuori tema e l'approvazione
+  di quella completa.
+
+## Riassunto della cronologia
+La cronologia della sessione (domande, passaggi con gli strumenti, risposte) va al modello a ogni turno, e
+`google/gemma-4-e2b` è caricato con 8192 token di contesto. All'inizio di ogni turno un nodo **riassunto**
+stima i token della cronologia (caratteri / 4). Se la stima supera `RIASSUNTO_SOGLIA_TOKEN` (default
+3000), i turni più vecchi diventano un riassunto e restano intatti solo gli ultimi 2 turni più la domanda
+corrente.
+
+```
+START → riassunto → router ─┬─ conversazione → modello ⇄ strumenti … → revisore → END
+                             └─ fuori_ambito → rifiuto → END
+```
+
+- Il riassunto è un messaggio di sistema in testa alla cronologia, che comincia con «Riassunto della
+  conversazione precedente:». Router, agente e revisore vedono già la cronologia compatta.
+- Il modello (senza strumenti) riassume solo i turni appena usciti dalla parte intatta, compresi i
+  risultati degli strumenti. Il programma accoda quel testo al riassunto precedente, che resta alla
+  lettera: chiamato a fondere i due riassunti, il modello perdeva i fatti precedenti.
+- Se il riassunto supera metà della soglia, il programma toglie le righe più vecchie.
+- Se il riassunto non riesce (errore del modello o testo vuoto), la cronologia resta invariata e il turno
+  prosegue.
+
+Righe di log (`LOG_LEVEL=INFO`) da cercare:
+- `riassunto: <k> messaggi riassunti, stima <n> → <m> token`;
+- `riassunto: stima <n> token sopra la soglia <s>, niente da riassumere` (pochi turni, ma lunghi);
+- `WARNING ... riassunto oltre <n> token: tolte <k> righe più vecchie`.
+
+La soglia predefinita è stata scelta misurando: una domanda breve con una cronologia minima costa già circa
+1750 `prompt_tokens`, quasi tutti per le definizioni dei 10 strumenti; 3000 token stimati di cronologia
+restano entro gli 8192. La stima è grossolana: con testi molto diversi dall'italiano può sbagliare.
+
+**Limiti noti:** dal riassunto in prosa `gemma-4-e2b` riprende i fatti («Che cosa ti avevo chiesto di
+annotare?») ma non sempre un dato puntuale: «Che numero ha la nota che ho aggiunto?» ha fallito 6 volte su
+6 nelle sonde con il riassunto, contro 2 su 2 con il turno intatto; nelle prove reali l'esito varia da
+un'esecuzione all'altra. La prova reale `test_riassunto_conserva_la_nota` lo tratta come osservazione (`pytest.xfail`). Un riassunto
+aggiunge una chiamata al modello (circa 3–6 s nelle sonde).
 
 ## Strumenti
 Il modello li richiede tramite tool calling; il programma li esegue davvero (registro in
@@ -466,6 +504,9 @@ cancellazioni. La prima esecuzione era fallita (il modello chiedeva il codice fa
 il grafo richiama il modello con un'istruzione (vedi «Diagnosi»).
 
 ## Diagnosi
+- **`WARNING assistente.grafo riassunto non disponibile: ...`**: il riassunto della cronologia non è
+  riuscito. La cronologia resta intera e il turno prosegue; se la sessione è molto lunga il modello può
+  superare il contesto. Il motivo segue i due punti.
 - **`WARNING assistente.revisore revisore non disponibile: ...`**: la valutazione non è riuscita; la
   risposta è approvata comunque e arriva all'utente; il motivo segue i due punti.
 - **`WARNING ... limite di revisioni raggiunto` frequente**: il modello non riesce a completare la

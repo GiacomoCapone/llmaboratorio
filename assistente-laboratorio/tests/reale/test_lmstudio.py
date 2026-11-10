@@ -14,8 +14,9 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
+from assistente.cli import esegui_turno
 from assistente.config import carica_config
 from archivio.inventario import PERCORSO_INVENTARIO, carica
 from archivio.note import apri
@@ -23,19 +24,53 @@ from assistente.grafo import build_graph
 from assistente.mcp_client import ClientArchivio
 from assistente.modello import crea_llm, verifica_modello
 from assistente.revisore import crea_revisore
+from assistente.riassunto import PREFISSO_RIASSUNTO, crea_riassuntore
 from assistente.router import crea_router
 from assistente.strumenti import crea_strumenti
 
 pytestmark = pytest.mark.reale
 
 
+def grafo_vero(config, archivio, soglia_riassunto):
+    """Grafo con modello, strumenti, router, revisore e riassuntore veri."""
+    llm = crea_llm(config)
+    return build_graph(
+        llm,
+        crea_strumenti(
+            lambda: datetime.now(timezone.utc),
+            config.fuso_predefinito,
+            config.citta_patrono,
+            esterni=archivio.strumenti(),
+        ),
+        config.max_passaggi,
+        crea_router(llm, config.ambito),
+        crea_revisore(llm),
+        config.max_revisioni,
+        crea_riassuntore(llm),
+        soglia_riassunto,
+    )
+
+
+def prompt_tokens(stato) -> int | None:
+    """`prompt_tokens` della prima risposta dell'agente nel turno, se il server li riporta."""
+    for m in stato["messaggi"]:
+        if isinstance(m, AIMessage) and m.response_metadata.get("token_usage"):
+            return m.response_metadata["token_usage"].get("prompt_tokens")
+    return None
+
+
 def esegui_domanda(
-    domanda, caplog, note_db: Path | None = None, categoria_attesa: str = "conversazione"
+    domanda,
+    caplog,
+    note_db: Path | None = None,
+    categoria_attesa: str = "conversazione",
+    cronologia=(),
 ):
     """Esegue un turno con il grafo vero; restituisce lo stato e i risultati validi degli strumenti.
 
     `note_db`: file delle note (anche già popolato); se None, un file in una cartella temporanea.
     `categoria_attesa`: classificazione che il router deve dare alla domanda.
+    `cronologia`: messaggi che precedono la domanda.
     """
     config = carica_config()
     verifica_modello(config)
@@ -43,24 +78,11 @@ def esegui_domanda(
     with tempfile.TemporaryDirectory() as cartella, ClientArchivio(
         ambiente={"NOTE_DB": str(note_db or Path(cartella) / "note.db")}
     ) as archivio:
-        llm = crea_llm(config)
-        grafo = build_graph(
-            llm,
-            crea_strumenti(
-                lambda: datetime.now(timezone.utc),
-                config.fuso_predefinito,
-                config.citta_patrono,
-                esterni=archivio.strumenti(),
-            ),
-            config.max_passaggi,
-            crea_router(llm, config.ambito),
-            crea_revisore(llm),
-            config.max_revisioni,
-        )
+        grafo = grafo_vero(config, archivio, config.soglia_riassunto)
         with caplog.at_level(logging.INFO, logger="assistente"):
             stato = grafo.invoke(
                 {
-                    "messaggi": [HumanMessage(domanda)],
+                    "messaggi": [*cronologia, HumanMessage(domanda)],
                     "passaggi": 0,
                     "interrotto": False,
                     "revisioni": 0,
@@ -70,7 +92,7 @@ def esegui_domanda(
             )
     print(
         f"\n[{domanda!r}] turno completato in {time.perf_counter() - inizio:.1f} s"
-        f" (revisioni: {stato.get('revisioni', 0)})"
+        f" (revisioni: {stato.get('revisioni', 0)}, prompt_tokens: {prompt_tokens(stato)})"
     )
     assert stato["categoria"] == categoria_attesa, stato["motivo"]
     assert not stato["interrotto"], "limite di passaggi raggiunto"
@@ -449,3 +471,66 @@ def test_revisore_rifiuta_risposta_fuori_tema(caplog):
         "Il calcio è uno sport molto popolare in Italia.", caplog, "Dove si trova il multimetro?"
     )
     assert valutazione.coerente is False
+
+
+def test_riassunto_conserva_la_nota(caplog):
+    # Soglia 200: dal quinto turno il riassunto scatta a ogni turno, quindi il turno della nota
+    # passa per più riassunti concatenati. Il tetto (metà soglia, 100 token) può togliere righe
+    # recenti più lunghe; con soglia 100 toglieva proprio la nota.
+    config = carica_config()
+    verifica_modello(config)
+    domande = [
+        "Annota che il saldatore va pulito",
+        "Che ore sono a Tokyo?",
+        "Quanto fa 12 * 4?",
+        "Quanti metri sono 2,5 km?",
+        "Quanti gradi Celsius sono 300 K?",
+    ]
+    with tempfile.TemporaryDirectory() as cartella, ClientArchivio(
+        ambiente={"NOTE_DB": str(Path(cartella) / "note.db")}
+    ) as archivio:
+        grafo = grafo_vero(config, archivio, 200)
+        cronologia = []
+        numero = None
+        with caplog.at_level(logging.INFO, logger="assistente"):
+            for domanda in domande:
+                cronologia = esegui_turno(grafo, cronologia, domanda).cronologia
+                salvate = [
+                    m.content for m in cronologia
+                    if isinstance(m, ToolMessage) and str(m.content).startswith("Nota ")
+                ]
+                if numero is None:
+                    assert salvate, f"aggiungi_nota non chiamato: {cronologia}"
+                    numero = re.match(r"Nota (\d+) ", salvate[0]).group(1)
+            inizio = time.perf_counter()
+            esito = esegui_turno(grafo, cronologia, "Che cosa ti avevo chiesto di annotare?")
+            durata = time.perf_counter() - inizio
+            numero_chiesto = esegui_turno(
+                grafo, esito.cronologia, "Che numero ha la nota che ho aggiunto?"
+            )
+    riassunti = [m.content for m in esito.cronologia if isinstance(m, SystemMessage)]
+    print()
+    print(f"[annotazione] {durata:.1f} s; risposta: {esito.testo!r}")
+    print(f"riassunto: {riassunti}")
+    print(f"[numero] risposta: {numero_chiesto.testo!r}")
+    print("righe di riassunto:", caplog.text.count("messaggi riassunti"))
+    assert caplog.text.count("messaggi riassunti") >= 2  # più riassunti concatenati
+    assert "riassunto non disponibile" not in caplog.text
+    print("tagli del tetto:", caplog.text.count("righe più vecchie"))
+    assert len(riassunti) == 1 and riassunti[0].startswith(PREFISSO_RIASSUNTO)
+    # Il fatto del primo turno sopravvive ai riassunti successivi (concatenazione).
+    assert re.search(rf"\b{numero}\b", riassunti[0]), riassunti[0]
+    assert "saldatore" in esito.testo.lower(), esito.testo
+    if not re.search(rf"\b{numero}\b", numero_chiesto.testo):
+        pytest.xfail(
+            "limite noto: dal riassunto gemma-4-e2b non ricava il numero della nota"
+            " (specifica del riassunto, «Revisione del 2026-11-10»)"
+        )
+
+
+def test_system_message_in_testa(caplog):
+    riassunto = SystemMessage(
+        PREFISSO_RIASSUNTO + "L'utente ha chiesto l'ora a Roma: erano le 13:00."
+    )
+    stato, _ = esegui_domanda("Quanto fa 2 + 3?", caplog, cronologia=[riassunto])
+    assert "5" in str(stato["messaggi"][-1].content)

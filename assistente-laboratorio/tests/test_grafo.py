@@ -15,8 +15,17 @@ from assistente.grafo import (
     instrada_dopo_revisore,
     instrada_dopo_router,
 )
+from assistente.riassunto import PREFISSO_RIASSUNTO
 from assistente.strumenti import Strumento, crea_strumenti
-from finti import LlmFinto, RevisoreFinto, RouterFinto, richiesta, richiesta_malformata, richiesta_ora
+from finti import (
+    LlmFinto,
+    RevisoreFinto,
+    RiassuntoreFinto,
+    RouterFinto,
+    richiesta,
+    richiesta_malformata,
+    richiesta_ora,
+)
 
 ADESSO = lambda: datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)  # noqa: E731
 
@@ -29,6 +38,9 @@ def esegui(
     router=None,
     revisore=None,
     max_revisioni=2,
+    riassuntore=None,
+    soglia_riassunto=100000,
+    cronologia=(),
 ):
     if strumenti is None:
         strumenti = crea_strumenti(ADESSO, "Europe/Rome")
@@ -36,10 +48,14 @@ def esegui(
         router = RouterFinto("conversazione")
     if revisore is None:
         revisore = RevisoreFinto([True])
-    grafo = build_graph(llm, strumenti, max_passaggi, router, revisore, max_revisioni)
+    if riassuntore is None:
+        riassuntore = RiassuntoreFinto()
+    grafo = build_graph(
+        llm, strumenti, max_passaggi, router, revisore, max_revisioni, riassuntore, soglia_riassunto
+    )
     return grafo.invoke(
         {
-            "messaggi": [HumanMessage(testo)],
+            "messaggi": [*cronologia, HumanMessage(testo)],
             "passaggi": 0,
             "interrotto": False,
             "revisioni": 0,
@@ -504,3 +520,139 @@ def test_risposta_vuota_rimandata_dal_revisore_vero(caplog):
     assert "revisore coerente=no motivo=risposta vuota → agente (revisione 1/2)" in caplog.text
     assert len(valutatore.chiamate) == 1  # solo la seconda risposta va al modello
     assert [m.content for m in stato["messaggi"]] == ["Che ore sono?", "Sono le 12."]
+
+
+def conversazione(n):
+    """n turni completi: D1/R1 … Dn/Rn."""
+    messaggi = []
+    for i in range(1, n + 1):
+        messaggi += [HumanMessage(f"D{i}"), AIMessage(f"R{i}")]
+    return messaggi
+
+
+def sistema(messaggi):
+    return [m for m in messaggi if isinstance(m, SystemMessage)]
+
+
+def test_sotto_soglia_nessun_riassunto():
+    riassuntore = RiassuntoreFinto()
+    stato = esegui(LlmFinto([AIMessage("Sono le 12.")]), riassuntore=riassuntore)
+    assert riassuntore.chiamate == []
+    assert [m.content for m in stato["messaggi"]] == ["Che ore sono?", "Sono le 12."]
+
+
+def test_sopra_soglia_riassume(caplog):
+    riassuntore = RiassuntoreFinto()
+    router = RouterFinto("conversazione")
+    with caplog.at_level(logging.INFO, logger="assistente.grafo"):
+        stato = esegui(
+            LlmFinto([AIMessage("R5")]),
+            testo="D5",
+            router=router,
+            riassuntore=riassuntore,
+            soglia_riassunto=1,
+            cronologia=conversazione(4),
+        )
+    assert [m.content for m in riassuntore.chiamate[0]] == ["D1", "R1", "D2", "R2"]
+    messaggi = stato["messaggi"]
+    assert messaggi[0] == SystemMessage(PREFISSO_RIASSUNTO + "riassunto di prova", id=messaggi[0].id)
+    assert len(sistema(messaggi)) == 1
+    assert [m.content for m in messaggi[1:]] == ["D3", "R3", "D4", "R4", "D5", "R5"]
+    assert "riassunto: 4 messaggi riassunti, stima " in caplog.text
+    assert "D1" not in [m.content for m in router.chiamate[0]]
+
+
+def test_sopra_soglia_senza_vecchi(caplog):
+    riassuntore = RiassuntoreFinto()
+    with caplog.at_level(logging.INFO, logger="assistente.grafo"):
+        stato = esegui(
+            LlmFinto([AIMessage("R2")]),
+            testo="D2",
+            riassuntore=riassuntore,
+            soglia_riassunto=1,
+            cronologia=conversazione(1),
+        )
+    assert riassuntore.chiamate == []
+    assert "niente da riassumere" in caplog.text
+    assert [m.content for m in stato["messaggi"]] == ["D1", "R1", "D2", "R2"]
+
+
+def test_secondo_riassunto_cumulativo():
+    vecchio = SystemMessage(PREFISSO_RIASSUNTO + "vecchio")
+    riassuntore = RiassuntoreFinto(testo="nuovo")
+    stato = esegui(
+        LlmFinto([AIMessage("R4")]),
+        testo="D4",
+        riassuntore=riassuntore,
+        soglia_riassunto=10,  # superata dalla cronologia; metà (5 token) contiene "vecchio\nnuovo"
+        cronologia=[vecchio, *conversazione(3)],
+    )
+    # Il precedente non va al modello (lo perdeva): il codice lo conserva alla lettera.
+    assert [m.content for m in riassuntore.chiamate[0]] == ["D1", "R1"]
+    riassunti = sistema(stato["messaggi"])
+    assert [m.content for m in riassunti] == [PREFISSO_RIASSUNTO + "vecchio\nnuovo"]
+
+
+def test_solo_riassunto_fra_i_vecchi(caplog):
+    riassuntore = RiassuntoreFinto()
+    with caplog.at_level(logging.INFO, logger="assistente.grafo"):
+        esegui(
+            LlmFinto([AIMessage("R3")]),
+            testo="D3",
+            riassuntore=riassuntore,
+            soglia_riassunto=1,
+            cronologia=[SystemMessage(PREFISSO_RIASSUNTO + "vecchio"), *conversazione(2)],
+        )
+    assert riassuntore.chiamate == []
+    assert "niente da riassumere" in caplog.text
+
+
+def test_riassunto_troppo_lungo(caplog):
+    righe = ["a" * 400, "b" * 400, "c" * 400]
+    precedente = SystemMessage(PREFISSO_RIASSUNTO + "\n".join(righe))
+    with caplog.at_level(logging.WARNING, logger="assistente.grafo"):
+        stato = esegui(
+            LlmFinto([AIMessage("R4")]),
+            testo="D4",
+            riassuntore=RiassuntoreFinto(testo="nuovo"),
+            soglia_riassunto=10,  # metà soglia: 5 token, restano solo le righe necessarie
+            cronologia=[precedente, *conversazione(3)],
+        )
+    assert "righe più vecchie" in caplog.text
+    assert sistema(stato["messaggi"])[0].content == PREFISSO_RIASSUNTO + "nuovo"
+
+
+@pytest.mark.parametrize(
+    "riassuntore",
+    [
+        RiassuntoreFinto(errore=RuntimeError("guasto")),
+        RiassuntoreFinto(testo=""),
+        RiassuntoreFinto(testo="   "),
+    ],
+)
+def test_guasto_lascia_la_cronologia(caplog, riassuntore):
+    with caplog.at_level(logging.WARNING, logger="assistente.grafo"):
+        stato = esegui(
+            LlmFinto([AIMessage("R4")]),
+            testo="D4",
+            riassuntore=riassuntore,
+            soglia_riassunto=1,
+            cronologia=conversazione(3),
+        )
+    assert sistema(stato["messaggi"]) == []
+    assert stato["messaggi"][0].content == "D1"
+    assert "riassunto non disponibile" in caplog.text
+
+
+def test_riassunto_e_revisione_nello_stesso_turno():
+    stato = esegui(
+        LlmFinto([AIMessage("bozza"), AIMessage("finale")]),
+        testo="D4",
+        revisore=RevisoreFinto([False, True]),
+        soglia_riassunto=1,
+        cronologia=conversazione(3),
+    )
+    contenuti = [m.content for m in stato["messaggi"]]
+    assert len(sistema(stato["messaggi"])) == 1
+    assert "bozza" not in contenuti
+    assert contenuti[-1] == "finale"

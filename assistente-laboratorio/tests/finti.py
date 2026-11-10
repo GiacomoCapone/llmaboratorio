@@ -14,6 +14,7 @@ class LlmFinto:
         self.chiamate: list[list] = []
         self.strumenti: list = []
         self.opzioni_strumenti: dict = {}  # argomenti in più passati a bind_tools
+        self.opzioni_bind: dict = {}  # argomenti passati a bind (senza strumenti)
         self.con_strumenti: list[bool] = []  # per invocazione: con o senza strumenti
         self._indice = 0
 
@@ -21,6 +22,10 @@ class LlmFinto:
         self.strumenti = list(tools)
         self.opzioni_strumenti = opzioni
         return _LlmLegato(self)
+
+    def bind(self, **opzioni) -> "_LlmSenzaStrumenti":
+        self.opzioni_bind = opzioni
+        return _LlmSenzaStrumenti(self)
 
     def invoke(self, messaggi) -> AIMessage:
         return self._rispondi(messaggi, con_strumenti=False)
@@ -48,6 +53,31 @@ class _LlmLegato:
 
     def invoke(self, messaggi) -> AIMessage:
         return self.base._rispondi(messaggi, con_strumenti=True)
+
+
+class _LlmSenzaStrumenti:
+    """Vista restituita da bind: le invocazioni risultano fatte senza strumenti."""
+
+    def __init__(self, base: LlmFinto):
+        self.base = base
+
+    def invoke(self, messaggi) -> AIMessage:
+        return self.base._rispondi(messaggi, con_strumenti=False)
+
+
+class RiassuntoreFinto:
+    """Riassuntore simulato: restituisce `testo` o solleva `errore`; registra i messaggi."""
+
+    def __init__(self, testo: str = "riassunto di prova", errore: Exception | None = None):
+        self.testo = testo
+        self.errore = errore
+        self.chiamate: list[list] = []
+
+    def __call__(self, vecchi) -> str:
+        self.chiamate.append(list(vecchi))
+        if self.errore is not None:
+            raise self.errore
+        return self.testo
 
 
 class RouterFinto:

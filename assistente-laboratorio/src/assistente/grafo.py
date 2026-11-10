@@ -14,9 +14,10 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langgraph.graph import END, START, StateGraph
-from langgraph.graph.message import add_messages
+from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 
 from assistente.revisore import Valutazione
+from assistente.riassunto import PREFISSO_RIASSUNTO, dividi, e_riassunto, stima_token, unisci
 from assistente.router import Classificazione
 from assistente.strumenti import Strumento
 
@@ -103,9 +104,54 @@ def build_graph(
     router: Callable[[list[AnyMessage]], Classificazione],
     revisore: Callable[[list[AnyMessage]], Valutazione],
     max_revisioni: int,
+    riassuntore: Callable[[list[AnyMessage]], str],
+    soglia_riassunto: int,
 ):
-    """Costruisce e compila il grafo router / rifiuto / modello / strumenti / limite / revisore."""
+    """Costruisce e compila il grafo riassunto / router / rifiuto / modello / strumenti / limite /
+    revisore."""
     llm_con_strumenti = llm.bind_tools([s.definizione for s in strumenti.values()])
+
+    def nodo_riassunto(stato: Stato) -> dict:
+        messaggi = stato["messaggi"]
+        stima = stima_token(messaggi)
+        if stima <= soglia_riassunto:
+            logger.debug("riassunto: stima %d token, sotto la soglia %d", stima, soglia_riassunto)
+            return {}
+        vecchi, recenti = dividi(messaggi)
+        precedente = ""
+        if vecchi and e_riassunto(vecchi[0]):
+            precedente = str(vecchi[0].content)[len(PREFISSO_RIASSUNTO):]
+            vecchi = vecchi[1:]
+        if not vecchi:
+            logger.info(
+                "riassunto: stima %d token sopra la soglia %d, niente da riassumere",
+                stima,
+                soglia_riassunto,
+            )
+            return {}
+        try:
+            testo = riassuntore(vecchi).strip()
+            if not testo:
+                raise ValueError("riassunto vuoto")
+        except Exception as errore:  # il riassunto non deve bloccare il turno
+            logger.warning("riassunto non disponibile: %s", errore)
+            return {}
+        # Il precedente resta alla lettera: il modello, chiamato a integrarlo, lo perdeva.
+        unito, tolte = unisci(precedente, testo, soglia_riassunto // 2)
+        if tolte:
+            logger.warning(
+                "riassunto oltre %d token: tolte %d righe più vecchie", soglia_riassunto // 2, tolte
+            )
+        riassunto = SystemMessage(PREFISSO_RIASSUNTO + unito, id=str(uuid4()))
+        logger.info(
+            "riassunto: %d messaggi riassunti, stima %d → %d token",
+            len(vecchi),
+            stima,
+            stima_token([riassunto, *recenti]),
+        )
+        # La cronologia è riscritta per intero: add_messages aggiunge in coda, il riassunto
+        # deve stare in testa.
+        return {"messaggi": [RemoveMessage(id=REMOVE_ALL_MESSAGES), riassunto, *recenti]}
 
     def nodo_router(stato: Stato) -> dict:
         esito = router(stato["messaggi"])
@@ -206,13 +252,15 @@ def build_graph(
         return {"messaggi": [AIMessage(MESSAGGIO_LIMITE)], "interrotto": True}
 
     grafo = StateGraph(Stato)
+    grafo.add_node("riassunto", nodo_riassunto)
     grafo.add_node("router", nodo_router)
     grafo.add_node("rifiuto", rifiuto)
     grafo.add_node("modello", modello)
     grafo.add_node("strumenti", esegui_strumenti)
     grafo.add_node("limite", limite)
     grafo.add_node("revisore", nodo_revisore)
-    grafo.add_edge(START, "router")
+    grafo.add_edge(START, "riassunto")
+    grafo.add_edge("riassunto", "router")
     grafo.add_conditional_edges(
         "router", instrada_dopo_router, {"agente": "modello", "rifiuto": "rifiuto"}
     )
@@ -228,5 +276,5 @@ def build_graph(
     grafo.add_edge("strumenti", "modello")
     grafo.add_edge("limite", END)
     return grafo.compile().with_config(
-        recursion_limit=max_passaggi * 2 + 12 + 2 * (max_revisioni + 1)
+        recursion_limit=max_passaggi * 2 + 13 + 2 * (max_revisioni + 1)
     )

@@ -4,7 +4,7 @@ Progetto del corso «Deep Learning e LLM: costruire chatbot e agenti».
 La cartella del progetto è `assistente-laboratorio/`.
 
 ## Struttura e comandi
-- Codice in `src/assistente/` (`config`, `modello`, `strumenti/`, `router`, `revisore`, `grafo`, `mcp_client`, `cli`); test in `tests/`,
+- Codice in `src/assistente/` (`config`, `modello`, `strumenti/`, `router`, `revisore`, `riassunto`, `grafo`, `mcp_client`, `cli`); test in `tests/`,
   prove con LM Studio in `tests/reale/`; specifica e piano in `docs/superpowers/`.
 - `strumenti/` è un pacchetto: un modulo per strumento e il registro (`crea_strumenti`) in
   `__init__.py`; il grafo esegue gli strumenti per nome senza conoscerli.
@@ -28,6 +28,8 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
   (`AMBITO_FILE`), senza raggiungere l'agente;
 - un revisore rimanda all'agente, con il motivo, le risposte incomplete o fuori tema, fino a
   `MAX_REVISIONI` volte;
+- all'inizio del turno riassume i turni più vecchi quando la cronologia stimata supera
+  `RIASSUNTO_SOGLIA_TOKEN`, tenendo intatti gli ultimi 2;
 - usa un modello servito da LM Studio, che resta sul computer host;
 - conserva la cronologia della conversazione per la durata della sessione (nessuna persistenza);
 - offre uno strumento orologio con fuso orario esplicito, richiesto dal modello tramite tool calling

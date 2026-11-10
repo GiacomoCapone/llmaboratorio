@@ -230,3 +230,19 @@ def test_max_revisioni_non_valido(valore):
     with pytest.raises(ErroreConfigurazione) as errore:
         carica_config({**BASE, "MAX_REVISIONI": valore})
     assert "MAX_REVISIONI" in str(errore.value)
+
+
+def test_soglia_riassunto_predefinita():
+    assert carica_config(BASE).soglia_riassunto == 3000
+
+
+@pytest.mark.parametrize("valore, atteso", [("500", 500), (" 500 ", 500), ("1", 1)])
+def test_soglia_riassunto_esplicita(valore, atteso):
+    assert carica_config({**BASE, "RIASSUNTO_SOGLIA_TOKEN": valore}).soglia_riassunto == atteso
+
+
+@pytest.mark.parametrize("valore", ["0", "-1", "abc", "1.5"])
+def test_soglia_riassunto_non_valida(valore):
+    with pytest.raises(ErroreConfigurazione) as errore:
+        carica_config({**BASE, "RIASSUNTO_SOGLIA_TOKEN": valore})
+    assert "RIASSUNTO_SOGLIA_TOKEN" in str(errore.value)

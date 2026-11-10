@@ -37,6 +37,7 @@ class Config:
     note_db: Path = NOTE_DB_PREDEFINITO
     ambito: str = ""
     max_revisioni: int = 2
+    soglia_riassunto: int = 3000
 
 
 def _obbligatoria(env: Mapping[str, str], nome: str) -> str:
@@ -130,6 +131,16 @@ def carica_config(env: Mapping[str, str] | None = None) -> Config:
             f"MAX_REVISIONI deve essere un intero positivo, trovato {grezzo_revisioni!r}."
         )
 
+    grezzo_soglia = env.get("RIASSUNTO_SOGLIA_TOKEN", "3000")
+    try:
+        soglia_riassunto = int(grezzo_soglia.strip())
+    except ValueError:
+        soglia_riassunto = 0
+    if soglia_riassunto < 1:
+        raise ErroreConfigurazione(
+            f"RIASSUNTO_SOGLIA_TOKEN deve essere un intero positivo, trovato {grezzo_soglia!r}."
+        )
+
     return Config(
         base_url,
         model,
@@ -141,4 +152,5 @@ def carica_config(env: Mapping[str, str] | None = None) -> Config:
         note_db,
         ambito,
         max_revisioni,
+        soglia_riassunto,
     )

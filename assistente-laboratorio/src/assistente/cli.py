@@ -13,6 +13,7 @@ from assistente.grafo import build_graph
 from assistente.mcp_client import ClientArchivio, ErroreArchivio
 from assistente.modello import ErroreModello, crea_llm, verifica_modello
 from assistente.revisore import crea_revisore
+from assistente.riassunto import crea_riassuntore
 from assistente.router import crea_router
 from assistente.strumenti import crea_strumenti
 
@@ -104,6 +105,8 @@ def main() -> int:
                 crea_router(llm, config.ambito),
                 crea_revisore(llm),
                 config.max_revisioni,
+                crea_riassuntore(llm),
+                config.soglia_riassunto,
             )
             print("Assistente del laboratorio. Scrivere 'esci' per terminare.")
             ciclo(grafo, lambda: input("> "), print)

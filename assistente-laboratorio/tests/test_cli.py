@@ -1,14 +1,15 @@
 from datetime import datetime, timezone
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, SystemMessage
 
 from assistente.cli import ciclo, esegui_turno, main
 from assistente.config import carica_config
 from assistente.grafo import MESSAGGIO_LIMITE, MESSAGGIO_RIFIUTO, build_graph
 from assistente.mcp_client import ErroreArchivio
+from assistente.riassunto import PREFISSO_RIASSUNTO
 from assistente.strumenti import Strumento, crea_strumenti
-from finti import LlmFinto, RevisoreFinto, RouterFinto, richiesta_ora
+from finti import LlmFinto, RevisoreFinto, RiassuntoreFinto, RouterFinto, richiesta_ora
 
 ADESSO = lambda: datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)  # noqa: E731
 
@@ -23,6 +24,8 @@ def crea_grafo(llm, max_passaggi, router=None, revisore=None):
         router or RouterFinto("conversazione"),
         revisore or RevisoreFinto([True]),
         2,
+        RiassuntoreFinto(),
+        100000,
     )
 
 
@@ -189,9 +192,12 @@ def test_main_passa_gli_strumenti_dell_archivio(monkeypatch):
     monkeypatch.setattr("assistente.cli.crea_llm", lambda config: None)
     monkeypatch.setattr("assistente.cli.crea_router", lambda llm, ambito: None)
     monkeypatch.setattr("assistente.cli.crea_revisore", lambda llm: None)
+    monkeypatch.setattr("assistente.cli.crea_riassuntore", lambda llm: None)
     nomi = []
 
-    def grafo_finto(llm, strumenti, max_passaggi, router, revisore, max_revisioni):
+    def grafo_finto(
+        llm, strumenti, max_passaggi, router, revisore, max_revisioni, riassuntore, soglia_riassunto
+    ):
         nomi.extend(strumenti)
         raise KeyboardInterrupt
 
@@ -277,12 +283,15 @@ def test_main_passa_il_router(monkeypatch):
         ricevuti.update(llm=llm, ambito=ambito)
         return router_finto
 
-    def grafo_finto(llm, strumenti, max_passaggi, router, revisore, max_revisioni):
+    def grafo_finto(
+        llm, strumenti, max_passaggi, router, revisore, max_revisioni, riassuntore, soglia_riassunto
+    ):
         ricevuti["router"] = router
         raise KeyboardInterrupt
 
     monkeypatch.setattr("assistente.cli.crea_router", crea_router_finto)
     monkeypatch.setattr("assistente.cli.crea_revisore", lambda llm: None)
+    monkeypatch.setattr("assistente.cli.crea_riassuntore", lambda llm: None)
     monkeypatch.setattr("assistente.cli.build_graph", grafo_finto)
     assert main() == 130
     assert ricevuti["llm"] is llm_finto
@@ -337,13 +346,66 @@ def test_main_passa_il_revisore(monkeypatch):
         ricevuti["llm"] = llm
         return revisore_finto
 
-    def grafo_finto(llm, strumenti, max_passaggi, router, revisore, max_revisioni):
+    def grafo_finto(
+        llm, strumenti, max_passaggi, router, revisore, max_revisioni, riassuntore, soglia_riassunto
+    ):
         ricevuti.update(revisore=revisore, max_revisioni=max_revisioni)
         raise KeyboardInterrupt
 
     monkeypatch.setattr("assistente.cli.crea_revisore", crea_revisore_finto)
+    monkeypatch.setattr("assistente.cli.crea_riassuntore", lambda llm: None)
     monkeypatch.setattr("assistente.cli.build_graph", grafo_finto)
     assert main() == 130
     assert ricevuti["llm"] is llm_finto
     assert ricevuti["revisore"] is revisore_finto
     assert ricevuti["max_revisioni"] == carica_config().max_revisioni
+
+
+def test_main_passa_il_riassuntore(monkeypatch):
+    imposta_env(monkeypatch)
+    monkeypatch.setattr("assistente.cli.ClientArchivio", lambda **kwargs: ArchivioFinto())
+    monkeypatch.setattr("assistente.cli.verifica_modello", lambda config: None)
+    llm_finto = object()
+    monkeypatch.setattr("assistente.cli.crea_llm", lambda config: llm_finto)
+    monkeypatch.setattr("assistente.cli.crea_router", lambda llm, ambito: None)
+    monkeypatch.setattr("assistente.cli.crea_revisore", lambda llm: None)
+    riassuntore_finto = object()
+    ricevuti = {}
+
+    def crea_riassuntore_finto(llm):
+        ricevuti["llm"] = llm
+        return riassuntore_finto
+
+    def grafo_finto(
+        llm, strumenti, max_passaggi, router, revisore, max_revisioni, riassuntore, soglia_riassunto
+    ):
+        ricevuti.update(riassuntore=riassuntore, soglia_riassunto=soglia_riassunto)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("assistente.cli.crea_riassuntore", crea_riassuntore_finto)
+    monkeypatch.setattr("assistente.cli.build_graph", grafo_finto)
+    assert main() == 130
+    assert ricevuti["llm"] is llm_finto
+    assert ricevuti["riassuntore"] is riassuntore_finto
+    assert ricevuti["soglia_riassunto"] == carica_config().soglia_riassunto
+
+
+def test_cronologia_compatta_al_turno_dopo():
+    llm = LlmFinto([AIMessage(f"R{i}") for i in range(1, 6)])
+    grafo = build_graph(
+        llm,
+        crea_strumenti(ADESSO, "Europe/Rome"),
+        5,
+        RouterFinto("conversazione"),
+        RevisoreFinto([True]),
+        2,
+        RiassuntoreFinto(),
+        1,
+    )
+    cronologia = []
+    for i in range(1, 5):
+        cronologia = esegui_turno(grafo, cronologia, f"D{i}").cronologia
+    assert isinstance(cronologia[0], SystemMessage)
+    assert cronologia[0].content.startswith(PREFISSO_RIASSUNTO)
+    esegui_turno(grafo, cronologia, "D5")
+    assert llm.chiamate[-1][0].content == PREFISSO_RIASSUNTO + "riassunto di prova"
