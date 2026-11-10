@@ -2,6 +2,7 @@
 
 import csv
 import unicodedata
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -101,6 +102,16 @@ class Inventario:
         }
         self._per_codice = {normalizza(a.codice): a for a in self.articoli}
         self._categorie = {normalizza(a.categoria): a.categoria for a in self.articoli}
+
+    def categorie(self) -> list[tuple[str, int]]:
+        """Categorie con il numero di articoli, in ordine alfabetico. Come nel filtro di `cerca`,
+        maiuscole e accenti non distinguono le categorie; il nome mostrato è quello del CSV usato
+        anche nei messaggi di `cerca`."""
+        conteggi = Counter(normalizza(a.categoria) for a in self.articoli)
+        return sorted(
+            ((self._categorie[chiave], numero) for chiave, numero in conteggi.items()),
+            key=lambda voce: normalizza(voce[0]),
+        )
 
     def cerca(self, testo: str | None, categoria: str | None) -> str:
         """Testo del risultato della ricerca, o di un errore che inizia con «Errore:»."""

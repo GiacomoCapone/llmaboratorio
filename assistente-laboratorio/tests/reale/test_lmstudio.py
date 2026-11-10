@@ -21,7 +21,7 @@ from assistente.config import carica_config
 from archivio.inventario import PERCORSO_INVENTARIO, carica
 from archivio.note import apri
 from assistente.grafo import build_graph
-from assistente.mcp_client import ClientArchivio
+from assistente.mcp_client import URI_CATEGORIE, ClientArchivio, con_categorie, nomi_categorie
 from assistente.modello import crea_llm, verifica_modello
 from assistente.revisore import crea_revisore
 from assistente.riassunto import PREFISSO_RIASSUNTO, crea_riassuntore
@@ -40,7 +40,10 @@ def grafo_vero(config, archivio, soglia_riassunto):
             lambda: datetime.now(timezone.utc),
             config.fuso_predefinito,
             config.citta_patrono,
-            esterni=archivio.strumenti(),
+            # Come la CLI: nomi delle categorie dalla resource nella descrizione di cerca_inventario.
+            esterni=con_categorie(
+                archivio.strumenti(), nomi_categorie(archivio.leggi_risorsa(URI_CATEGORIE))
+            ),
         ),
         config.max_passaggi,
         crea_router(llm, config.ambito),
@@ -534,3 +537,48 @@ def test_system_message_in_testa(caplog):
     )
     stato, _ = esegui_domanda("Quanto fa 2 + 3?", caplog, cronologia=[riassunto])
     assert "5" in str(stato["messaggi"][-1].content)
+
+
+CATEGORIE_DI_ESEMPIO = [
+    "alimentatori",
+    "attrezzi",
+    "cavi e connettori",
+    "componenti passivi",
+    "schede e microcontrollori",
+    "sicurezza",
+    "strumenti di misura",
+]
+
+
+def test_il_modello_elenca_le_categorie(caplog):
+    stato, _ = esegui_domanda("Quali categorie ci sono nell'inventario?", caplog)
+    risposta = str(stato["messaggi"][-1].content).lower()
+    print("risposta:", risposta)
+    mancanti = [c for c in CATEGORIE_DI_ESEMPIO if c not in risposta]
+    assert mancanti == [], f"categorie mancanti: {mancanti}"
+
+
+def test_osserva_categoria_esatta(caplog):
+    """Osservazione: con i nomi nella descrizione il modello usa la categoria esatta."""
+    stato, _ = esegui_domanda("Che cosa c'è fra gli strumenti di misura?", caplog)
+    chiamate = [(c["name"], c["args"]) for c in chiamate_strumenti(stato)]
+    print("chiamate:", chiamate)
+    if not any(
+        nome == "cerca_inventario" and args.get("categoria") == "strumenti di misura"
+        for nome, args in chiamate
+    ):
+        pytest.xfail(f"categoria non esatta: {chiamate}")
+
+
+def test_osserva_componenti_passivi(caplog):
+    """Osservazione: nella sonda il modello aggiungeva testo='tutti' alla categoria (nessun articolo)."""
+    stato, _ = esegui_domanda("Che componenti passivi abbiamo in laboratorio?", caplog)
+    chiamate = [(c["name"], c["args"]) for c in chiamate_strumenti(stato)]
+    risultati = risultati_strumenti(stato)
+    print("chiamate:", chiamate)
+    categoria_esatta = any(
+        nome == "cerca_inventario" and args.get("categoria") == "componenti passivi"
+        for nome, args in chiamate
+    )
+    if not categoria_esatta or not any(r.startswith("Trovat") for r in risultati):
+        pytest.xfail(f"ricerca dei componenti passivi senza risultati: {chiamate} -> {risultati}")

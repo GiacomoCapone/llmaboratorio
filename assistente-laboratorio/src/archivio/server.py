@@ -1,4 +1,5 @@
-"""Server MCP «archivio»: espone inventario e note del laboratorio come strumenti."""
+"""Server MCP «archivio»: espone inventario e note del laboratorio come strumenti e le categorie
+dell'inventario come resource."""
 
 from typing import Annotated
 
@@ -34,8 +35,25 @@ DESCRIZIONE_ELIMINA = (
 )
 
 
+URI_CATEGORIE = "archivio://inventario/categorie"
+DESCRIZIONE_CATEGORIE = "Categorie dell'inventario del laboratorio con il numero di articoli."
+INTESTAZIONE_CATEGORIE = (
+    "Categorie dell'inventario (nomi esatti per il filtro categoria di cerca_inventario):"
+)
+
+
+def testo_categorie(inventario: Inventario) -> str:
+    """Testo della resource delle categorie: intestazione e una riga per categoria."""
+    righe = [
+        f"- {nome} ({numero} {'articolo' if numero == 1 else 'articoli'})"
+        for nome, numero in inventario.categorie()
+    ]
+    return "\n".join([INTESTAZIONE_CATEGORIE, *righe])
+
+
 def crea_server(inventario: Inventario, note: Note) -> MCPServer:
-    """Server chiamato «archivio» con gli strumenti legati all'inventario e alle note date."""
+    """Server chiamato «archivio» con gli strumenti e la resource delle categorie legati
+    all'inventario e alle note dati; il testo della resource è generato a ogni lettura."""
     server = MCPServer("archivio", log_level="WARNING")
 
     @server.tool(description=DESCRIZIONE_CERCA)
@@ -90,5 +108,14 @@ def crea_server(inventario: Inventario, note: Note) -> MCPServer:
         numero: Annotated[int, Field(description="Numero della nota da eliminare, per esempio 3.")],
     ) -> str:
         return note.elimina(numero)
+
+    @server.resource(
+        URI_CATEGORIE,
+        name="categorie",
+        mime_type="text/plain",
+        description=DESCRIZIONE_CATEGORIE,
+    )
+    def categorie() -> str:
+        return testo_categorie(inventario)
 
     return server

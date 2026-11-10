@@ -11,11 +11,13 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
+from mcp.types import BlobResourceContents, ReadResourceResult
 
 import archivio.__main__ as main_archivio
 from assistente import mcp_client
 from archivio.note import CARTELLA_PROGETTO, PERCORSO_NOTE_PREDEFINITO
-from assistente.mcp_client import ClientArchivio, ErroreArchivio
+from assistente.mcp_client import ClientArchivio, ErroreArchivio, con_categorie, nomi_categorie
+from assistente.strumenti import Strumento
 
 DESCRIZIONE_CERCA = (
     "Cerca nell'inventario del laboratorio (strumenti, componenti, attrezzi) per parole e/o categoria e "
@@ -310,3 +312,119 @@ def test_main_note_non_valide(tmp_path, monkeypatch, capsys):
     finally:
         signal.signal(signal.SIGINT, originale)
     assert capsys.readouterr().err.startswith("Errore: archivio delle note non valido")
+
+
+def test_leggi_risorsa_categorie(client):
+    testo = client.leggi_risorsa(mcp_client.URI_CATEGORIE)
+    assert testo.startswith(
+        "Categorie dell'inventario (nomi esatti per il filtro categoria di cerca_inventario):"
+    )
+    assert "- strumenti di misura (4 articoli)" in testo
+    assert "- alimentatori (3 articoli)" in testo
+
+
+def test_leggi_risorsa_uri_sconosciuto(client):
+    with pytest.raises(ErroreArchivio, match="archivio://altro"):
+        client.leggi_risorsa("archivio://altro")
+    assert "alimentatori" in client.leggi_risorsa(mcp_client.URI_CATEGORIE)
+
+
+def test_leggi_risorsa_client_chiuso(tmp_path):
+    with ClientArchivio(ambiente={"NOTE_DB": str(tmp_path / "note.db")}) as proprio:
+        pass
+    with pytest.raises(ErroreArchivio, match="archivio non disponibile"):
+        proprio.leggi_risorsa(mcp_client.URI_CATEGORIE)
+
+
+def test_leggi_risorsa_server_morto(tmp_path):
+    with ClientArchivio(SERVER_CHE_MUORE, ambiente={"NOTE_DB": str(tmp_path / "note.db")}) as proprio:
+        cerca = {s.nome: s for s in proprio.strumenti()}["cerca_inventario"]
+        cerca.esegui({"testo": "multimetro"})
+        cerca.esegui({"testo": "multimetro"})  # il server muore qui
+        inizio = time.monotonic()
+        with pytest.raises(ErroreArchivio):
+            proprio.leggi_risorsa(mcp_client.URI_CATEGORIE)
+        assert time.monotonic() - inizio < 5
+
+
+@pytest.mark.parametrize(
+    "contenuti",
+    [
+        [],
+        [BlobResourceContents(uri="archivio://x", blob="AA==", mime_type="application/octet-stream")],
+    ],
+)
+def test_leggi_risorsa_contenuto_non_testuale(monkeypatch, client, contenuti):
+    async def finta(uri, **opzioni):
+        return ReadResourceResult(contents=contenuti)
+
+    monkeypatch.setattr(client._sessione, "read_resource", finta)
+    with pytest.raises(ErroreArchivio, match="non ha contenuto testuale"):
+        client.leggi_risorsa(mcp_client.URI_CATEGORIE)
+
+
+def test_nomi_categorie(client):
+    assert nomi_categorie(client.leggi_risorsa(mcp_client.URI_CATEGORIE)) == [
+        "alimentatori",
+        "attrezzi",
+        "cavi e connettori",
+        "componenti passivi",
+        "schede e microcontrollori",
+        "sicurezza",
+        "strumenti di misura",
+    ]
+
+
+def test_nomi_categorie_senza_righe():
+    intestazione = "Categorie dell'inventario (nomi esatti per il filtro categoria di cerca_inventario):"
+    assert nomi_categorie(intestazione) == []
+    assert nomi_categorie("\n".join([intestazione, "testo", "-senza spazio", "- attrezzi (1 articolo)"])) == [
+        "attrezzi"
+    ]
+
+
+def test_nomi_categorie_con_parentesi():
+    assert nomi_categorie("- cavi (rame) (2 articoli)") == ["cavi (rame)"]
+
+
+def strumento_finto(nome, proprieta=None):
+    parametri = {"type": "object", "properties": proprieta if proprieta is not None else {}}
+    definizione = {"type": "function", "function": {"name": nome, "parameters": parametri}}
+    return Strumento(definizione, lambda args, nome=nome: f"eseguito {nome}")
+
+
+def cerca_finto():
+    return strumento_finto("cerca_inventario", {"categoria": {"type": "string", "description": "Nome esatto."}})
+
+
+def descrizione_categoria(strumento):
+    return strumento.definizione["function"]["parameters"]["properties"]["categoria"]["description"]
+
+
+def test_con_categorie():
+    cerca, altro = cerca_finto(), strumento_finto("altro")
+    risultato = con_categorie([cerca, altro], ["a", "b"])
+    assert [s.nome for s in risultato] == ["cerca_inventario", "altro"]
+    assert descrizione_categoria(risultato[0]) == "Nome esatto. Categorie esistenti: a, b."
+    assert risultato[0].esegui({}) == "eseguito cerca_inventario"
+    assert risultato[1] is altro
+
+
+def test_con_categorie_non_modifica_l_originale():
+    cerca = cerca_finto()
+    con_categorie([cerca], ["a"])
+    assert descrizione_categoria(cerca) == "Nome esatto."
+
+
+@pytest.mark.parametrize(
+    "strumenti, nomi",
+    [
+        ([cerca_finto()], []),
+        ([strumento_finto("altro")], ["a"]),
+        ([strumento_finto("cerca_inventario")], ["a"]),
+    ],
+)
+def test_con_categorie_invariata(strumenti, nomi):
+    risultato = con_categorie(strumenti, nomi)
+    assert len(risultato) == len(strumenti)
+    assert all(r is s for r, s in zip(risultato, strumenti))

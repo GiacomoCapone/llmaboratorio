@@ -7,6 +7,7 @@ aperti); il resto dell'assistente vede soltanto voci `Strumento` con un `esegui`
 
 import asyncio
 import concurrent.futures
+import copy
 import logging
 import os
 import sys
@@ -28,6 +29,8 @@ NON_DISPONIBILE = "Errore: archivio non disponibile."
 NESSUNA_RISPOSTA = "Errore: l'archivio non ha risposto."
 # Margine per la chiusura del sottoprocesso da parte dell'SDK (attese limitate, alcuni secondi).
 ATTESA_CHIUSURA = 10.0
+# Stesso valore di `archivio.server.URI_CATEGORIE`: l'assistente non importa il pacchetto archivio.
+URI_CATEGORIE = "archivio://inventario/categorie"
 
 
 class ErroreArchivio(Exception):
@@ -47,6 +50,32 @@ def _ambiente(extra: dict[str, str] | None = None) -> dict[str, str]:
         "PYTHONPATH": os.pathsep.join(percorsi),
         "PYTHONIOENCODING": "utf-8",
     }
+
+
+def nomi_categorie(testo: str) -> list[str]:
+    """Nomi delle categorie dal testo della resource: righe «- <nome> (<n> articoli)»."""
+    return [
+        riga[2 : riga.rindex(" (")]
+        for riga in testo.splitlines()
+        if riga.startswith("- ") and " (" in riga
+    ]
+
+
+def con_categorie(strumenti: list[Strumento], nomi: list[str]) -> list[Strumento]:
+    """Strumenti con i nomi delle categorie aggiunti alla descrizione del parametro `categoria` di
+    `cerca_inventario`, su una copia della definizione; il resto è restituito così com'è."""
+    risultato = []
+    for strumento in strumenti:
+        proprieta = strumento.definizione["function"].get("parameters", {}).get("properties", {})
+        if nomi and strumento.nome == "cerca_inventario" and "categoria" in proprieta:
+            definizione = copy.deepcopy(strumento.definizione)
+            categoria = definizione["function"]["parameters"]["properties"]["categoria"]
+            categoria["description"] = (
+                categoria.get("description", "") + " Categorie esistenti: " + ", ".join(nomi) + "."
+            )
+            strumento = Strumento(definizione, strumento.esegui)
+        risultato.append(strumento)
+    return risultato
 
 
 def _descrivi(errore: BaseException, timeout: float) -> str:
@@ -163,6 +192,34 @@ class ClientArchivio:
             logger.warning("archivio: %s ha restituito un errore: %s", nome, testo)
             if not testo.startswith("Errore:"):
                 testo = f"Errore: {testo}"
+        return testo
+
+    def leggi_risorsa(self, uri: str) -> str:
+        """Testo del primo contenuto della resource `uri`; solleva `ErroreArchivio` se non riesce.
+
+        Chi legge è l'applicazione, non il modello: per questo un guasto è un'eccezione e non un
+        testo `Errore: ...` come in `_chiama`.
+        """
+        if self._chiuso:
+            raise ErroreArchivio("archivio non disponibile.")
+        lettura = self._sessione.read_resource(uri)
+        futuro = None
+        try:
+            futuro = asyncio.run_coroutine_threadsafe(lettura, self._loop)
+            risultato = futuro.result(self._timeout)
+        except TimeoutError:
+            futuro.cancel()
+            raise ErroreArchivio(
+                f"l'archivio non ha risposto entro {self._timeout:g} secondi."
+            ) from None
+        except Exception as errore:
+            if futuro is None:
+                lettura.close()  # mai inviata al loop: evita «coroutine was never awaited»
+            raise ErroreArchivio(f"lettura di {uri} fallita: {errore}") from errore
+        contenuti = getattr(risultato, "contents", None) or []
+        testo = getattr(contenuti[0], "text", None) if contenuti else None
+        if not isinstance(testo, str):
+            raise ErroreArchivio(f"la resource {uri} non ha contenuto testuale.")
         return testo
 
     def __exit__(self, *eccezione) -> bool:

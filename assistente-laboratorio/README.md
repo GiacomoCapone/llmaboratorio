@@ -205,6 +205,30 @@ annotare?») ma non sempre un dato puntuale: «Che numero ha la nota che ho aggi
 un'esecuzione all'altra. La prova reale `test_riassunto_conserva_la_nota` lo tratta come osservazione (`pytest.xfail`). Un riassunto
 aggiunge una chiamata al modello (circa 3–6 s nelle sonde).
 
+## Categorie dell'inventario (resource MCP)
+Oltre agli strumenti, il server «archivio» espone una **resource** MCP, `archivio://inventario/categorie`
+(`text/plain`), generata dal CSV a ogni lettura:
+```
+Categorie dell'inventario (nomi esatti per il filtro categoria di cerca_inventario):
+- alimentatori (3 articoli)
+- attrezzi (4 articoli)
+...
+```
+La legge l'applicazione, non il modello: all'avvio, subito dopo l'apertura dell'archivio, l'assistente
+legge la resource e aggiunge i nomi alla descrizione del parametro `categoria` di `cerca_inventario`
+(«… Categorie esistenti: alimentatori, attrezzi, …»), nella copia della definizione inviata al modello. Così
+il modello conosce i nomi esatti del filtro e risponde a «Quali categorie ci sono nell'inventario?».
+
+Righe di log (`LOG_LEVEL=INFO`):
+- `INFO assistente.cli contesto: letta la resource archivio://inventario/categorie (7 categorie)`;
+- `WARNING assistente.cli contesto non disponibile: <causa>` (vedi «Diagnosi»).
+
+Perché non un messaggio di sistema: la prima versione anteponeva il testo della resource come messaggio di
+sistema a ogni chiamata dell'agente. Con `google/gemma-4-e2b` il modello smetteva di chiamare gli strumenti
+(sonda su tre domande, «Annota che il saldatore va pulito», «Quali note ci sono?», «Che cosa c'è fra gli
+strumenti di misura?»: strumenti chiamati 9 volte su 9 senza il messaggio, 0 su 9 con il messaggio). Con i
+nomi nella descrizione del parametro: 12 chiamate corrette su 12 (sei domande, due volte ciascuna).
+
 ## Strumenti
 Il modello li richiede tramite tool calling; il programma li esegue davvero (registro in
 `src/assistente/strumenti/`).
@@ -254,7 +278,8 @@ Il modello li richiede tramite tool calling; il programma li esegue davvero (reg
   Gli strumenti sono offerti dal server MCP «archivio» (`src/archivio/`), che l'assistente avvia da sé
   come sottoprocesso via stdio all'avvio: nessuna configurazione. Se non parte, l'assistente non si
   avvia (vedi «Diagnosi»). Esempi di domande: «Abbiamo dei multimetri? Dove sono?», «Dammi i dettagli
-  dell'articolo MIS-001», «Che cosa c'è fra gli strumenti di misura?».
+  dell'articolo MIS-001», «Che cosa c'è fra gli strumenti di misura?». I nomi delle categorie arrivano al
+  modello dalla resource dell'archivio (vedi «Categorie dell'inventario (resource MCP)»).
 
 - **Note del laboratorio** (`aggiungi_nota`, `elenca_note`, `elimina_nota`): note di testo libero,
   con un codice articolo facoltativo (verificato contro l'inventario), salvate in un database SQLite
@@ -317,8 +342,8 @@ con versione fissata, per lo più per i trasporti HTTP e l'autenticazione (`star
 ```powershell
 .venv\Scripts\python.exe -m pytest
 ```
-I test non richiedono un modello attivo né Internet (esito verificato il 2026-11-09: 535 passati, 23
-deselezionati: 21 `reale` e 2 `rete`).
+I test non richiedono un modello attivo né Internet (esito verificato il 2026-11-10: 661 passati, 39
+deselezionati: 37 `reale` e 2 `rete`).
 
 Prova con Open-Meteo vero (Internet, senza modello; esclusa di default, marker `rete`):
 ```powershell
@@ -503,7 +528,32 @@ cancellazioni. La prima esecuzione era fallita (il modello chiedeva il codice fa
 «Annota che…», rispondeva con un testo vuoto): sono state riformulate le descrizioni degli strumenti e
 il grafo richiama il modello con un'istruzione (vedi «Diagnosi»).
 
+Categorie dell'inventario (resource MCP, 2026-11-10, `google/gemma-4-e2b`), da Git Bash:
+```bash
+CITTA_PATRONO=Pordenone .venv/Scripts/python.exe -m pytest -m reale -v -s
+```
+→ 30 passate, 1 fallita, 5 xfailed, 1 xpassed, 1329 s. Prove nuove: «Quali categorie ci sono
+nell'inventario?» → risposta con tutte e 7 le categorie; «Che cosa c'è fra gli strumenti di misura?» →
+`cerca_inventario` con `categoria` «strumenti di misura»; «Che componenti passivi abbiamo in laboratorio?» →
+`cerca_inventario` con `categoria` «componenti passivi» (2 su 2 anche da sola; «Che componenti passivi
+abbiamo?», senza «in laboratorio», è stata rifiutata dal router come fuori ambito). La prova fallita è
+`test_riassunto_conserva_la_nota`: il tetto a metà soglia aveva tolto la riga della nota dal riassunto;
+rilanciata da sola è passata 2 volte su 2 (instabilità del limite noto, vedi «Riassunto della cronologia»).
+
+Prova manuale da PowerShell e con Docker (dopo `docker compose build`, riuscito):
+```powershell
+$env:LOG_LEVEL = "INFO"
+"Quali categorie ci sono nell'inventario?", "esci" | .venv\Scripts\python.exe avvia.py
+"Quali categorie ci sono nell'inventario?", "esci" | docker compose run --rm -T -e LOG_LEVEL=INFO assistente
+```
+→ in entrambi i casi uscita 0, riga `contesto: letta la resource archivio://inventario/categorie (7 categorie)`
+e risposta «Le categorie disponibili nell'inventario del laboratorio sono: alimentatori, attrezzi, cavi e
+connettori, componenti passivi, schede e microcontrollori, sicurezza, strumenti di misura.»
+
 ## Diagnosi
+- **`WARNING assistente.cli contesto non disponibile: ...`**: all'avvio la resource delle categorie non è
+  stata letta (archivio che non risponde, resource assente). L'assistente parte comunque; la descrizione di
+  `cerca_inventario` resta senza l'elenco delle categorie. Il motivo segue i due punti.
 - **`WARNING assistente.grafo riassunto non disponibile: ...`**: il riassunto della cronologia non è
   riuscito. La cronologia resta intera e il turno prosegue; se la sessione è molto lunga il modello può
   superare il contesto. Il motivo segue i due punti.

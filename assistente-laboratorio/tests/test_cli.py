@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 
 import pytest
@@ -6,6 +7,7 @@ from langchain_core.messages import AIMessage, SystemMessage
 from assistente.cli import ciclo, esegui_turno, main
 from assistente.config import carica_config
 from assistente.grafo import MESSAGGIO_LIMITE, MESSAGGIO_RIFIUTO, build_graph
+from assistente import mcp_client
 from assistente.mcp_client import ErroreArchivio
 from assistente.riassunto import PREFISSO_RIASSUNTO
 from assistente.strumenti import Strumento, crea_strumenti
@@ -146,11 +148,25 @@ def test_ctrl_c_durante_il_turno_annulla_solo_il_turno():
     assert "Prima" not in unisci_testo(llm.chiamate[-1])
 
 
+RESOURCE_DI_PROVA = "Categorie:\n- attrezzi (2 articoli)\n- sicurezza (1 articolo)"
+
+
 class ArchivioFinto:
-    def __init__(self, strumenti=(), errore=None):
+    def __init__(
+        self, strumenti=(), errore=None, contesto=RESOURCE_DI_PROVA, errore_lettura=None
+    ):
         self._strumenti = list(strumenti)
         self._errore = errore
+        self._contesto = contesto
+        self._errore_lettura = errore_lettura
+        self.letti = []
         self.uscito = False
+
+    def leggi_risorsa(self, uri):
+        self.letti.append(uri)
+        if self._errore_lettura:
+            raise self._errore_lettura
+        return self._contesto
 
     def __enter__(self):
         if self._errore:
@@ -196,7 +212,14 @@ def test_main_passa_gli_strumenti_dell_archivio(monkeypatch):
     nomi = []
 
     def grafo_finto(
-        llm, strumenti, max_passaggi, router, revisore, max_revisioni, riassuntore, soglia_riassunto
+        llm,
+        strumenti,
+        max_passaggi,
+        router,
+        revisore,
+        max_revisioni,
+        riassuntore,
+        soglia_riassunto,
     ):
         nomi.extend(strumenti)
         raise KeyboardInterrupt
@@ -284,7 +307,14 @@ def test_main_passa_il_router(monkeypatch):
         return router_finto
 
     def grafo_finto(
-        llm, strumenti, max_passaggi, router, revisore, max_revisioni, riassuntore, soglia_riassunto
+        llm,
+        strumenti,
+        max_passaggi,
+        router,
+        revisore,
+        max_revisioni,
+        riassuntore,
+        soglia_riassunto,
     ):
         ricevuti["router"] = router
         raise KeyboardInterrupt
@@ -347,7 +377,14 @@ def test_main_passa_il_revisore(monkeypatch):
         return revisore_finto
 
     def grafo_finto(
-        llm, strumenti, max_passaggi, router, revisore, max_revisioni, riassuntore, soglia_riassunto
+        llm,
+        strumenti,
+        max_passaggi,
+        router,
+        revisore,
+        max_revisioni,
+        riassuntore,
+        soglia_riassunto,
     ):
         ricevuti.update(revisore=revisore, max_revisioni=max_revisioni)
         raise KeyboardInterrupt
@@ -377,7 +414,14 @@ def test_main_passa_il_riassuntore(monkeypatch):
         return riassuntore_finto
 
     def grafo_finto(
-        llm, strumenti, max_passaggi, router, revisore, max_revisioni, riassuntore, soglia_riassunto
+        llm,
+        strumenti,
+        max_passaggi,
+        router,
+        revisore,
+        max_revisioni,
+        riassuntore,
+        soglia_riassunto,
     ):
         ricevuti.update(riassuntore=riassuntore, soglia_riassunto=soglia_riassunto)
         raise KeyboardInterrupt
@@ -409,3 +453,79 @@ def test_cronologia_compatta_al_turno_dopo():
     assert cronologia[0].content.startswith(PREFISSO_RIASSUNTO)
     esegui_turno(grafo, cronologia, "D5")
     assert llm.chiamate[-1][0].content == PREFISSO_RIASSUNTO + "riassunto di prova"
+
+
+def prepara_main(monkeypatch, finto):
+    imposta_env(monkeypatch)
+    monkeypatch.setattr("assistente.cli.ClientArchivio", lambda **kwargs: finto)
+    monkeypatch.setattr("assistente.cli.verifica_modello", lambda config: None)
+    monkeypatch.setattr("assistente.cli.crea_llm", lambda config: None)
+    monkeypatch.setattr("assistente.cli.crea_router", lambda llm, ambito: None)
+    monkeypatch.setattr("assistente.cli.crea_revisore", lambda llm: None)
+    monkeypatch.setattr("assistente.cli.crea_riassuntore", lambda llm: None)
+
+
+def cerca_finto():
+    definizione = {
+        "type": "function",
+        "function": {
+            "name": "cerca_inventario",
+            "parameters": {
+                "type": "object",
+                "properties": {"categoria": {"type": "string", "description": "Nome esatto."}},
+            },
+        },
+    }
+    return Strumento(definizione, lambda args: "x")
+
+
+def descrizione_ricevuta(monkeypatch):
+    """Sostituisce build_graph: registra la descrizione di `categoria` di cerca_inventario."""
+    ricevuti = {}
+
+    def grafo_finto(llm, strumenti, *args):
+        definizione = strumenti["cerca_inventario"].definizione
+        ricevuti["descrizione"] = definizione["function"]["parameters"]["properties"]["categoria"][
+            "description"
+        ]
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("assistente.cli.build_graph", grafo_finto)
+    return ricevuti
+
+
+def test_main_arricchisce_cerca_inventario(monkeypatch, caplog):
+    finto = ArchivioFinto([cerca_finto()])
+    prepara_main(monkeypatch, finto)
+    ricevuti = descrizione_ricevuta(monkeypatch)
+    with caplog.at_level(logging.INFO, logger="assistente.cli"):
+        assert main() == 130
+    assert ricevuti["descrizione"] == "Nome esatto. Categorie esistenti: attrezzi, sicurezza."
+    assert finto.letti == [mcp_client.URI_CATEGORIE]
+    assert "contesto: letta la resource archivio://inventario/categorie (2 categorie)" in caplog.text
+
+
+def test_main_contesto_non_disponibile(monkeypatch, caplog):
+    guasto = ErroreArchivio("l'archivio non ha risposto entro 10 secondi")
+    prepara_main(monkeypatch, ArchivioFinto([cerca_finto()], errore_lettura=guasto))
+    ricevuti = descrizione_ricevuta(monkeypatch)
+    with caplog.at_level(logging.INFO, logger="assistente.cli"):
+        assert main() == 130
+    assert ricevuti["descrizione"] == "Nome esatto."
+    avvisi = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert [r.getMessage() for r in avvisi] == [
+        "contesto non disponibile: l'archivio non ha risposto entro 10 secondi"
+    ]
+
+
+def test_main_senza_contesto(monkeypatch, capsys):
+    guasto = ErroreArchivio("lettura fallita")
+    prepara_main(monkeypatch, ArchivioFinto(errore_lettura=guasto))
+    monkeypatch.setattr("assistente.cli.crea_llm", lambda config: LlmFinto([AIMessage("Ciao.")]))
+    monkeypatch.setattr("assistente.cli.crea_router", lambda llm, ambito: RouterFinto("conversazione"))
+    monkeypatch.setattr("assistente.cli.crea_revisore", lambda llm: RevisoreFinto([True]))
+    monkeypatch.setattr("assistente.cli.crea_riassuntore", lambda llm: RiassuntoreFinto())
+    righe = iter(["ciao", "esci"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(righe))
+    assert main() == 0
+    assert "Ciao." in capsys.readouterr().out

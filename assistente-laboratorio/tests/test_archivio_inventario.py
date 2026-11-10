@@ -228,3 +228,35 @@ def test_inventario_del_pacchetto():
     mis = next(a for a in inv.articoli if a.codice == "MIS-001")
     assert "Multimetro" in mis.nome and mis.quantita > 1
     assert any(a.quantita == 0 for a in inv.articoli)
+
+
+ALIMENTATORE = "ALI-001;Alimentatore da banco;alimentatori;2;Scaffale B;"
+CACCIAVITE = "ATT-002;Cacciavite;attrezzi;5;Cassetto;"
+
+
+def test_categorie_ordinate_con_conteggio(tmp_path):
+    inv = inventario(tmp_path, [MULTIMETRO, OSCILLOSCOPIO, ALIMENTATORE, PINZA, CACCIAVITE])
+    assert inv.categorie() == [("alimentatori", 1), ("attrezzi", 2), ("strumenti di misura", 2)]
+
+
+def test_categorie_inventario_di_esempio():
+    assert carica(PERCORSO_INVENTARIO).categorie() == [
+        ("alimentatori", 3),
+        ("attrezzi", 4),
+        ("cavi e connettori", 4),
+        ("componenti passivi", 4),
+        ("schede e microcontrollori", 4),
+        ("sicurezza", 4),
+        ("strumenti di misura", 4),
+    ]
+
+
+def test_categorie_scritte_diversamente(tmp_path):
+    # Come il filtro di cerca: maiuscole e accenti non distinguono le categorie.
+    inv = inventario(tmp_path, ["ATT-001;Pinza;Attrezzi;1;Cassetto;", CACCIAVITE, ALIMENTATORE])
+    assert inv.categorie() == [("alimentatori", 1), ("attrezzi", 2)]
+
+
+def test_categorie_ordine_senza_maiuscole_e_accenti(tmp_path):
+    righe = ["OTT-001;Lente;Ottica;1;Cassetto;", "ELE-001;Cavo;èlettrico;1;Cassetto;", PINZA]
+    assert [n for n, _ in inventario(tmp_path, righe).categorie()] == ["attrezzi", "èlettrico", "Ottica"]
