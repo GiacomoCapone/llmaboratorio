@@ -3,9 +3,17 @@
 import asyncio
 from datetime import datetime, timezone
 
+import pytest
+from mcp.shared.exceptions import MCPError
+
 from archivio.inventario import Articolo, Inventario
 from archivio.note import apri
-from archivio.server import INTESTAZIONE_CATEGORIE, URI_CATEGORIE, crea_server
+from archivio.server import (
+    DESCRIZIONE_SCHEDA,
+    INTESTAZIONE_CATEGORIE,
+    URI_CATEGORIE,
+    crea_server,
+)
 from archivio.server import testo_categorie as genera_testo  # alias: pytest raccoglierebbe test*
 
 
@@ -78,3 +86,34 @@ def test_strumenti_invariati(tmp_path):
         "elenca_note",
         "elimina_nota",
     ]
+
+
+CON_MIS = Inventario([articolo("MIS-001", "strumenti di misura"), articolo("ATT-001", "attrezzi")])
+
+
+def test_prompt_elencato(tmp_path):
+    prompt = asyncio.run(server_con(tmp_path, CON_MIS).list_prompts())
+    assert len(prompt) == 1
+    assert prompt[0].name == "scheda_articolo"
+    assert prompt[0].description == DESCRIZIONE_SCHEDA
+    assert DESCRIZIONE_SCHEDA == "Scheda di un articolo dell'inventario con le sue note."
+    assert [(a.name, a.required) for a in prompt[0].arguments] == [("codice", True)]
+
+
+@pytest.mark.parametrize("codice", ["mis-001", " MIS-001 "])
+def test_prompt_testo(tmp_path, codice):
+    risultato = asyncio.run(
+        server_con(tmp_path, CON_MIS).get_prompt("scheda_articolo", {"codice": codice})
+    )
+    assert len(risultato.messages) == 1
+    assert risultato.messages[0].role == "user"
+    assert risultato.messages[0].content.text == (
+        "Dammi i dettagli dell'articolo MIS-001 e le note che lo riguardano."
+    )
+
+
+@pytest.mark.parametrize("codice, atteso", [("XYZ", "'XYZ'"), (" xyz ", "'xyz'"), ("", "''")])
+def test_prompt_codice_sconosciuto(tmp_path, codice, atteso):
+    server = server_con(tmp_path, CON_MIS)
+    with pytest.raises(MCPError, match="nessun articolo con codice " + atteso + r"\."):
+        asyncio.run(server.get_prompt("scheda_articolo", {"codice": codice}))

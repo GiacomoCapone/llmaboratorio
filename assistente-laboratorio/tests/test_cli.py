@@ -2,13 +2,13 @@ import logging
 from datetime import datetime, timezone
 
 import pytest
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from assistente.cli import ciclo, esegui_turno, main
+from assistente.cli import MESSAGGIO_TURNO_ANNULLATO, ciclo, esegui_turno, main
 from assistente.config import carica_config
 from assistente.grafo import MESSAGGIO_LIMITE, MESSAGGIO_RIFIUTO, build_graph
 from assistente import mcp_client
-from assistente.mcp_client import ErroreArchivio
+from assistente.mcp_client import ErroreArchivio, PromptArchivio
 from assistente.riassunto import PREFISSO_RIASSUNTO
 from assistente.strumenti import Strumento, crea_strumenti
 from finti import LlmFinto, RevisoreFinto, RiassuntoreFinto, RouterFinto, richiesta_ora
@@ -179,6 +179,9 @@ class ArchivioFinto:
 
     def strumenti(self):
         return self._strumenti
+
+    def prompt_disponibili(self):
+        return []
 
 
 def imposta_env(monkeypatch):
@@ -529,3 +532,165 @@ def test_main_senza_contesto(monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", lambda prompt="": next(righe))
     assert main() == 0
     assert "Ciao." in capsys.readouterr().out
+
+
+class PromptFinti:
+    """Archivio finto per i prompt: registra le chiamate e restituisce un testo o solleva `errore`."""
+
+    def __init__(self, prompt, errore=None):
+        self._prompt = list(prompt)
+        self._errore = errore
+        self.chiamate = []
+
+    def prompt_disponibili(self):
+        return self._prompt
+
+    def testo_prompt(self, nome, argomenti):
+        self.chiamate.append((nome, argomenti))
+        if self._errore:
+            raise self._errore
+        return f"testo di {nome} {argomenti}"
+
+
+SCHEDA = PromptArchivio("scheda_articolo", "Scheda.", ["codice"])
+NOTA = PromptArchivio("nota", "Nota.", ["codice", "testo"])
+SALUTO = PromptArchivio("saluto", "Saluto.", [])
+
+
+def esegui_ciclo(righe, prompt, grafo=None):
+    grafo = grafo or GrafoCheRegistra()
+    uscite = []
+    ciclo(grafo, leggi_da([*righe, "esci"]), uscite.append, prompt=prompt)
+    return grafo, uscite
+
+
+def domande(grafo):
+    """Testo dell'ultimo HumanMessage di ogni turno eseguito dal grafo."""
+    return [stato["messaggi"][-1].content for stato in grafo.stati]
+
+
+def test_prompt_elenco():
+    grafo, uscite = esegui_ciclo(["/prompt"], PromptFinti([SCHEDA, NOTA, SALUTO]))
+    assert "\n".join(uscite).splitlines() == [
+        "/scheda_articolo <codice> — Scheda.",
+        "/nota <codice> <testo> — Nota.",
+        "/saluto — Saluto.",
+    ]
+    assert grafo.stati == []
+
+
+def test_prompt_elenco_vuoto():
+    grafo, uscite = esegui_ciclo(["/prompt"], PromptFinti([]))
+    assert uscite == ["Nessun prompt disponibile."]
+    assert grafo.stati == []
+
+
+def test_prompt_avvia_il_turno(caplog):
+    prompt = PromptFinti([SCHEDA])
+    with caplog.at_level(logging.INFO, logger="assistente.cli"):
+        grafo, uscite = esegui_ciclo(["/scheda_articolo mis-001"], prompt)
+    testo = "testo di scheda_articolo {'codice': 'mis-001'}"
+    assert prompt.chiamate == [("scheda_articolo", {"codice": "mis-001"})]
+    assert uscite == [f"(prompt) {testo}", "ok"]
+    assert domande(grafo) == [testo]
+    assert isinstance(grafo.stati[0]["messaggi"][-1], HumanMessage)
+    assert "prompt: /scheda_articolo {'codice': 'mis-001'}" in caplog.text
+
+
+def test_prompt_resta_in_cronologia():
+    grafo, _ = esegui_ciclo(["/scheda_articolo MIS-001", "ciao"], PromptFinti([SCHEDA]))
+    secondo = [m.content for m in grafo.stati[1]["messaggi"]]
+    assert secondo == ["testo di scheda_articolo {'codice': 'MIS-001'}", "ok", "ciao"]
+
+
+def test_prompt_ultimo_argomento_prende_il_resto():
+    prompt = PromptFinti([NOTA])
+    esegui_ciclo(["/nota MIS-001 display  rotto da ieri"], prompt)
+    assert prompt.chiamate == [("nota", {"codice": "MIS-001", "testo": "display  rotto da ieri"})]
+
+
+@pytest.mark.parametrize(
+    "riga, atteso",
+    [
+        ("/scheda_articolo", "Errore: /scheda_articolo richiede: <codice>."),
+        ("/scheda_articolo   ", "Errore: /scheda_articolo richiede: <codice>."),
+        ("/nota MIS-001", "Errore: /nota richiede: <codice> <testo>."),
+    ],
+)
+def test_prompt_argomento_mancante(riga, atteso):
+    prompt = PromptFinti([SCHEDA, NOTA])
+    grafo, uscite = esegui_ciclo([riga], prompt)
+    assert uscite == [atteso]
+    assert prompt.chiamate == [] and grafo.stati == []
+
+
+def test_prompt_senza_argomenti_con_testo():
+    prompt = PromptFinti([SALUTO])
+    grafo, uscite = esegui_ciclo(["/saluto x", "/saluto"], prompt)
+    assert uscite[0] == "Errore: /saluto non ha argomenti."
+    assert prompt.chiamate == [("saluto", {})]
+    assert len(grafo.stati) == 1
+
+
+@pytest.mark.parametrize("riga, nome", [("/xyz 1", "/xyz"), ("/SCHEDA_ARTICOLO MIS-001", "/SCHEDA_ARTICOLO"), ("/", "/")])
+def test_prompt_sconosciuto(riga, nome):
+    prompt = PromptFinti([SCHEDA])
+    grafo, uscite = esegui_ciclo([riga], prompt)
+    assert uscite == [f"Errore: prompt sconosciuto '{nome}'. Scrivere /prompt per l'elenco."]
+    assert prompt.chiamate == [] and grafo.stati == []
+
+
+def test_prompt_errore_del_server():
+    prompt = PromptFinti([SCHEDA], errore=ErroreArchivio("nessun articolo con codice 'XYZ'."))
+    grafo, uscite = esegui_ciclo(["/scheda_articolo XYZ", "ciao"], prompt)
+    assert uscite[0] == "Errore: nessun articolo con codice 'XYZ'."
+    assert domande(grafo) == ["ciao"]
+    assert len(grafo.stati[0]["messaggi"]) == 1  # nessuna traccia del prompt in cronologia
+
+
+class GrafoCheSiInterrompe(GrafoCheRegistra):
+    """Al primo turno simula Ctrl-C; poi risponde come GrafoCheRegistra."""
+
+    def invoke(self, stato):
+        if not self.stati:
+            self.stati.append(stato)
+            raise KeyboardInterrupt
+        return super().invoke(stato)
+
+
+def test_prompt_ctrl_c_annulla_il_turno():
+    grafo, uscite = esegui_ciclo(
+        ["/scheda_articolo MIS-001", "ciao"], PromptFinti([SCHEDA]), GrafoCheSiInterrompe()
+    )
+    assert MESSAGGIO_TURNO_ANNULLATO in uscite
+    assert [m.content for m in grafo.stati[1]["messaggi"]] == ["ciao"]
+
+
+def test_senza_prompt_la_barra_va_al_modello():
+    grafo = GrafoCheRegistra()
+    ciclo(grafo, leggi_da(["/prompt", "esci"]), lambda testo: None)
+    assert domande(grafo) == ["/prompt"]
+
+
+def test_main_passa_l_archivio_a_ciclo(monkeypatch, capsys):
+    prepara_main(monkeypatch, ArchivioFinto())
+    monkeypatch.setattr("assistente.cli.crea_llm", lambda config: LlmFinto([AIMessage("Ciao.")]))
+    monkeypatch.setattr("assistente.cli.crea_router", lambda llm, ambito: RouterFinto("conversazione"))
+    monkeypatch.setattr("assistente.cli.crea_revisore", lambda llm: RevisoreFinto([True]))
+    monkeypatch.setattr("assistente.cli.crea_riassuntore", lambda llm: RiassuntoreFinto())
+    righe = iter(["/prompt", "esci"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(righe))
+    assert main() == 0
+    uscita = capsys.readouterr().out
+    assert (
+        "Assistente del laboratorio. Scrivere 'esci' per terminare, '/prompt' per i prompt dell'archivio."
+        in uscita
+    )
+    assert "Nessun prompt disponibile." in uscita
+
+
+def test_prompt_ctrl_c_durante_la_richiesta():
+    prompt = PromptFinti([SCHEDA], errore=KeyboardInterrupt())
+    grafo, uscite = esegui_ciclo(["/scheda_articolo MIS-001", "ciao"], prompt)
+    assert uscite[0] == MESSAGGIO_TURNO_ANNULLATO
+    assert domande(grafo) == ["ciao"]

@@ -582,3 +582,23 @@ def test_osserva_componenti_passivi(caplog):
     )
     if not categoria_esatta or not any(r.startswith("Trovat") for r in risultati):
         pytest.xfail(f"ricerca dei componenti passivi senza risultati: {chiamate} -> {risultati}")
+
+
+def test_il_modello_usa_la_scheda_articolo(caplog, tmp_path):
+    """Prompt MCP: il testo di /scheda_articolo MIS-001 porta l'agente a dettaglio_articolo."""
+    note_db = tmp_path / "note.db"
+    prepara_nota(note_db, "Batteria scarica", "MIS-001")
+    with ClientArchivio(ambiente={"NOTE_DB": str(note_db)}) as archivio:
+        testo = archivio.testo_prompt("scheda_articolo", {"codice": "MIS-001"})
+    stato, _ = esegui_domanda(testo, caplog, note_db)
+    chiamate = [(c["name"], c["args"]) for c in chiamate_strumenti(stato)]
+    print("chiamate:", chiamate)
+    assert any(
+        nome == "dettaglio_articolo" and str(args.get("codice", "")).upper() == "MIS-001"
+        for nome, args in chiamate
+    ), f"dettaglio_articolo non chiamato con MIS-001: {chiamate}"
+    if not any(
+        nome == "elenca_note" and str(args.get("codice", "")).upper() == "MIS-001"
+        for nome, args in chiamate
+    ):
+        pytest.xfail(f"elenca_note non chiamato con MIS-001: {chiamate}")

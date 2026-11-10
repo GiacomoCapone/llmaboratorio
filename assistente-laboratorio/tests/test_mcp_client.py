@@ -11,12 +11,24 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
-from mcp.types import BlobResourceContents, ReadResourceResult
+from mcp.types import (
+    BlobResourceContents,
+    GetPromptResult,
+    PromptMessage,
+    ReadResourceResult,
+    TextContent,
+)
 
 import archivio.__main__ as main_archivio
 from assistente import mcp_client
 from archivio.note import CARTELLA_PROGETTO, PERCORSO_NOTE_PREDEFINITO
-from assistente.mcp_client import ClientArchivio, ErroreArchivio, con_categorie, nomi_categorie
+from assistente.mcp_client import (
+    ClientArchivio,
+    ErroreArchivio,
+    PromptArchivio,
+    con_categorie,
+    nomi_categorie,
+)
 from assistente.strumenti import Strumento
 
 DESCRIZIONE_CERCA = (
@@ -428,3 +440,59 @@ def test_con_categorie_invariata(strumenti, nomi):
     risultato = con_categorie(strumenti, nomi)
     assert len(risultato) == len(strumenti)
     assert all(r is s for r, s in zip(risultato, strumenti))
+
+
+def test_prompt_disponibili(client):
+    assert client.prompt_disponibili() == [
+        PromptArchivio(
+            "scheda_articolo", "Scheda di un articolo dell'inventario con le sue note.", ["codice"]
+        )
+    ]
+
+
+def test_testo_prompt(client):
+    assert client.testo_prompt("scheda_articolo", {"codice": "mis-001"}) == (
+        "Dammi i dettagli dell'articolo MIS-001 e le note che lo riguardano."
+    )
+
+
+def test_testo_prompt_codice_sconosciuto(client):
+    with pytest.raises(ErroreArchivio, match="nessun articolo con codice 'XYZ'"):
+        client.testo_prompt("scheda_articolo", {"codice": "XYZ"})
+    assert "MIS-001" in client.testo_prompt("scheda_articolo", {"codice": "MIS-001"})
+
+
+def test_testo_prompt_sconosciuto(client):
+    with pytest.raises(ErroreArchivio):
+        client.testo_prompt("altro", {})
+
+
+def test_testo_prompt_client_chiuso(tmp_path):
+    with ClientArchivio(ambiente={"NOTE_DB": str(tmp_path / "note.db")}) as proprio:
+        pass
+    with pytest.raises(ErroreArchivio, match="archivio non disponibile"):
+        proprio.testo_prompt("scheda_articolo", {"codice": "MIS-001"})
+
+
+def test_testo_prompt_server_morto(tmp_path):
+    with ClientArchivio(SERVER_CHE_MUORE, ambiente={"NOTE_DB": str(tmp_path / "note.db")}) as proprio:
+        cerca = {s.nome: s for s in proprio.strumenti()}["cerca_inventario"]
+        cerca.esegui({"testo": "multimetro"})
+        cerca.esegui({"testo": "multimetro"})  # il server muore qui
+        inizio = time.monotonic()
+        with pytest.raises(ErroreArchivio, match=r"^archivio non disponibile\.$"):
+            proprio.testo_prompt("scheda_articolo", {"codice": "MIS-001"})
+        assert time.monotonic() - inizio < 5
+
+
+@pytest.mark.parametrize(
+    "messaggi",
+    [[], [PromptMessage(role="assistant", content=TextContent(type="text", text="x"))]],
+)
+def test_testo_prompt_senza_domanda(monkeypatch, client, messaggi):
+    async def finta(nome, argomenti=None, **opzioni):
+        return GetPromptResult(messages=messaggi)
+
+    monkeypatch.setattr(client._sessione, "get_prompt", finta)
+    with pytest.raises(ErroreArchivio, match="non ha prodotto una domanda"):
+        client.testo_prompt("scheda_articolo", {"codice": "MIS-001"})

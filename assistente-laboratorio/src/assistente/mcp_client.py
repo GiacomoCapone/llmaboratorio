@@ -13,12 +13,16 @@ import os
 import sys
 import tempfile
 import threading
+from collections.abc import Callable, Coroutine
 from contextlib import AsyncExitStack
+from dataclasses import dataclass
 from pathlib import Path
 
 import anyio
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
+from mcp.shared.exceptions import MCPError
+from mcp.types import CONNECTION_CLOSED
 
 from assistente.strumenti import Strumento
 
@@ -50,6 +54,23 @@ def _ambiente(extra: dict[str, str] | None = None) -> dict[str, str]:
         "PYTHONPATH": os.pathsep.join(percorsi),
         "PYTHONIOENCODING": "utf-8",
     }
+
+
+@dataclass(frozen=True)
+class PromptArchivio:
+    """Un prompt offerto dal server: nome, descrizione e nomi degli argomenti nell'ordine dichiarato."""
+
+    nome: str
+    descrizione: str
+    argomenti: list[str]
+
+
+def _causa_prompt(errore: Exception) -> str:
+    """Causa leggibile di un errore di `get_prompt`: il messaggio del server, salvo la connessione
+    chiusa (server terminato), detta come per gli strumenti."""
+    if isinstance(errore, MCPError) and errore.error.code == CONNECTION_CLOSED:
+        return "archivio non disponibile."
+    return str(errore)
 
 
 def nomi_categorie(testo: str) -> list[str]:
@@ -101,6 +122,7 @@ class ClientArchivio:
         self._timeout = timeout
         self._chiuso = True
         self._strumenti_mcp: list = []
+        self._prompt_mcp: list = []
 
     def __enter__(self) -> "ClientArchivio":
         self._loop = asyncio.new_event_loop()
@@ -111,7 +133,9 @@ class ClientArchivio:
         self._fine = asyncio.Event()  # legato al loop solo al primo uso, nel thread del loop
         self._vita = asyncio.run_coroutine_threadsafe(self._vivi(), self._loop)
         try:
-            self._strumenti_mcp = self._pronto.result(self._timeout + ATTESA_CHIUSURA)
+            self._strumenti_mcp, self._prompt_mcp = self._pronto.result(
+                self._timeout + ATTESA_CHIUSURA
+            )
         except BaseException as errore:
             self._ferma(attesa=ATTESA_CHIUSURA)
             motivo = self._stderr_del_server() or _descrivi(errore, self._timeout)
@@ -143,8 +167,9 @@ class ClientArchivio:
                 with anyio.fail_after(self._timeout):
                     await sessione.initialize()
                     strumenti = (await sessione.list_tools()).tools
+                    prompt = (await sessione.list_prompts()).prompts
                 self._sessione = sessione
-                self._pronto.set_result(strumenti)
+                self._pronto.set_result((strumenti, prompt))
                 await self._fine.wait()
         except Exception as errore:
             if not self._pronto.done():
@@ -194,19 +219,19 @@ class ClientArchivio:
                 testo = f"Errore: {testo}"
         return testo
 
-    def leggi_risorsa(self, uri: str) -> str:
-        """Testo del primo contenuto della resource `uri`; solleva `ErroreArchivio` se non riesce.
+    def _attendi(self, crea: Callable[[], Coroutine], descrivi: Callable[[Exception], str]):
+        """Esegue sulla sessione la richiesta creata da `crea` e ne attende il risultato.
 
-        Chi legge è l'applicazione, non il modello: per questo un guasto è un'eccezione e non un
-        testo `Errore: ...` come in `_chiama`.
+        Chi la usa è l'applicazione, non il modello: per questo un guasto è un `ErroreArchivio` (non
+        un testo `Errore: ...` come in `_chiama`); `descrivi` dà la causa per un errore del server.
         """
         if self._chiuso:
             raise ErroreArchivio("archivio non disponibile.")
-        lettura = self._sessione.read_resource(uri)
+        richiesta = crea()
         futuro = None
         try:
-            futuro = asyncio.run_coroutine_threadsafe(lettura, self._loop)
-            risultato = futuro.result(self._timeout)
+            futuro = asyncio.run_coroutine_threadsafe(richiesta, self._loop)
+            return futuro.result(self._timeout)
         except TimeoutError:
             futuro.cancel()
             raise ErroreArchivio(
@@ -214,13 +239,38 @@ class ClientArchivio:
             ) from None
         except Exception as errore:
             if futuro is None:
-                lettura.close()  # mai inviata al loop: evita «coroutine was never awaited»
-            raise ErroreArchivio(f"lettura di {uri} fallita: {errore}") from errore
+                richiesta.close()  # mai inviata al loop: evita «coroutine was never awaited»
+            raise ErroreArchivio(descrivi(errore)) from errore
+
+    def leggi_risorsa(self, uri: str) -> str:
+        """Testo del primo contenuto della resource `uri`; solleva `ErroreArchivio` se non riesce."""
+        risultato = self._attendi(
+            lambda: self._sessione.read_resource(uri),
+            lambda errore: f"lettura di {uri} fallita: {errore}",
+        )
         contenuti = getattr(risultato, "contents", None) or []
         testo = getattr(contenuti[0], "text", None) if contenuti else None
         if not isinstance(testo, str):
             raise ErroreArchivio(f"la resource {uri} non ha contenuto testuale.")
         return testo
+
+    def prompt_disponibili(self) -> list[PromptArchivio]:
+        """I prompt offerti dal server, letti all'avvio."""
+        return [
+            PromptArchivio(p.name, p.description or "", [a.name for a in p.arguments or []])
+            for p in self._prompt_mcp
+        ]
+
+    def testo_prompt(self, nome: str, argomenti: dict[str, str]) -> str:
+        """Testo del messaggio utente generato dal prompt `nome`; solleva `ErroreArchivio`."""
+        risultato = self._attendi(
+            lambda: self._sessione.get_prompt(nome, argomenti), _causa_prompt
+        )
+        for messaggio in getattr(risultato, "messages", None) or []:
+            testo = getattr(messaggio.content, "text", None)
+            if messaggio.role == "user" and isinstance(testo, str):
+                return testo
+        raise ErroreArchivio(f"il prompt {nome} non ha prodotto una domanda.")
 
     def __exit__(self, *eccezione) -> bool:
         self._chiuso = True

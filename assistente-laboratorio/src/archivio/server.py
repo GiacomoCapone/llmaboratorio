@@ -1,9 +1,10 @@
-"""Server MCP «archivio»: espone inventario e note del laboratorio come strumenti e le categorie
-dell'inventario come resource."""
+"""Server MCP «archivio»: espone inventario e note del laboratorio come strumenti, le categorie
+dell'inventario come resource e la scheda di un articolo come prompt."""
 
 from typing import Annotated
 
 from mcp.server import MCPServer
+from mcp.shared.exceptions import MCPError
 from pydantic import Field
 
 from archivio.inventario import Inventario
@@ -40,6 +41,10 @@ DESCRIZIONE_CATEGORIE = "Categorie dell'inventario del laboratorio con il numero
 INTESTAZIONE_CATEGORIE = (
     "Categorie dell'inventario (nomi esatti per il filtro categoria di cerca_inventario):"
 )
+
+
+DESCRIZIONE_SCHEDA = "Scheda di un articolo dell'inventario con le sue note."
+TESTO_SCHEDA = "Dammi i dettagli dell'articolo {codice} e le note che lo riguardano."
 
 
 def testo_categorie(inventario: Inventario) -> str:
@@ -117,5 +122,13 @@ def crea_server(inventario: Inventario, note: Note) -> MCPServer:
     )
     def categorie() -> str:
         return testo_categorie(inventario)
+
+    @server.prompt(name="scheda_articolo", description=DESCRIZIONE_SCHEDA)
+    def scheda_articolo(codice: str) -> str:
+        canonico = inventario.codice_canonico(codice)
+        if canonico is None:
+            # MCPError: un'altra eccezione arriverebbe al client solo come «Error rendering prompt».
+            raise MCPError(-32602, f"nessun articolo con codice '{codice.strip()}'.")
+        return TESTO_SCHEDA.format(codice=canonico)
 
     return server

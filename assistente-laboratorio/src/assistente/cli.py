@@ -56,7 +56,41 @@ def esegui_turno(grafo, cronologia: list[BaseMessage], domanda: str) -> EsitoTur
     return EsitoTurno(testo, list(messaggi), False)
 
 
-def ciclo(grafo, leggi: Callable[[], str], scrivi: Callable[[str], None]) -> None:
+def espandi_prompt(riga: str, prompt) -> tuple[str | None, str]:
+    """Riga `/...` → (domanda del turno o None, testo da mostrare). `/prompt` elenca i prompt."""
+    nome, _, resto = riga[1:].partition(" ")
+    resto = resto.strip()
+    offerti = {p.nome: p for p in prompt.prompt_disponibili()}
+    if nome == "prompt" and not resto:
+        if not offerti:
+            return None, "Nessun prompt disponibile."
+        return None, "\n".join(
+            " ".join([f"/{p.nome}", *(f"<{a}>" for a in p.argomenti)]) + f" — {p.descrizione}"
+            for p in offerti.values()
+        )
+    voce = offerti.get(nome)
+    if voce is None:
+        return None, f"Errore: prompt sconosciuto '/{nome}'. Scrivere /prompt per l'elenco."
+    if not voce.argomenti:
+        if resto:
+            return None, f"Errore: /{nome} non ha argomenti."
+        valori = []
+    else:
+        valori = resto.split(maxsplit=len(voce.argomenti) - 1)
+        if len(valori) < len(voce.argomenti):
+            richiesti = " ".join(f"<{a}>" for a in voce.argomenti)
+            return None, f"Errore: /{nome} richiede: {richiesti}."
+    argomenti = dict(zip(voce.argomenti, valori))
+    try:
+        testo = prompt.testo_prompt(nome, argomenti)
+    except ErroreArchivio as errore:
+        return None, f"Errore: {errore}"
+    logger.info("prompt: /%s %s", nome, argomenti)
+    return testo, f"(prompt) {testo}"
+
+
+def ciclo(grafo, leggi: Callable[[], str], scrivi: Callable[[str], None], prompt=None) -> None:
+    """Legge le domande ed esegue i turni; con `prompt` (l'archivio) le righe `/...` sono prompt."""
     cronologia: list[BaseMessage] = []
     while True:
         try:
@@ -68,6 +102,16 @@ def ciclo(grafo, leggi: Callable[[], str], scrivi: Callable[[str], None]) -> Non
             continue
         if riga.lower() in COMANDI_USCITA:
             break
+        if prompt is not None and riga.startswith("/"):
+            try:
+                domanda, messaggio = espandi_prompt(riga, prompt)
+            except KeyboardInterrupt:  # Ctrl-C durante l'attesa del server: come per un turno
+                scrivi(MESSAGGIO_TURNO_ANNULLATO)
+                continue
+            scrivi(messaggio)
+            if domanda is None:
+                continue
+            riga = domanda
         try:
             esito = esegui_turno(grafo, cronologia, riga)
         except KeyboardInterrupt:  # Ctrl-C annulla il turno, non la sessione
@@ -126,8 +170,11 @@ def main() -> int:
                 crea_riassuntore(llm),
                 config.soglia_riassunto,
             )
-            print("Assistente del laboratorio. Scrivere 'esci' per terminare.")
-            ciclo(grafo, lambda: input("> "), print)
+            print(
+                "Assistente del laboratorio. Scrivere 'esci' per terminare, "
+                "'/prompt' per i prompt dell'archivio."
+            )
+            ciclo(grafo, lambda: input("> "), print, prompt=archivio)
     except (ErroreConfigurazione, ErroreModello, ErroreArchivio) as errore:
         print(f"Errore: {errore}", file=sys.stderr)
         return 1

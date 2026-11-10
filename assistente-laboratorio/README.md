@@ -229,6 +229,27 @@ sistema a ogni chiamata dell'agente. Con `google/gemma-4-e2b` il modello smettev
 strumenti di misura?»: strumenti chiamati 9 volte su 9 senza il messaggio, 0 su 9 con il messaggio). Con i
 nomi nella descrizione del parametro: 12 chiamate corrette su 12 (sei domande, due volte ciascuna).
 
+## Prompt dell'archivio (prompt MCP)
+Il server «archivio» offre anche dei **prompt** MCP: modelli di domanda che sceglie l'utente. Nella CLI una
+riga che comincia con `/` è un prompt:
+- `/prompt` elenca i prompt offerti con i loro argomenti, per esempio
+  `/scheda_articolo <codice> — Scheda di un articolo dell'inventario con le sue note.`;
+- `/scheda_articolo MIS-001` chiede al server il testo del prompt, lo mostra come
+  `(prompt) Dammi i dettagli dell'articolo MIS-001 e le note che lo riguardano.` e lo usa come domanda del
+  turno: passa da router, agente e revisore e resta in cronologia come se l'utente l'avesse scritto.
+
+Il server normalizza il codice (`mis-001` → `MIS-001`). Gli argomenti sono separati da spazi; l'ultimo prende
+il resto della riga. Errori (nessun turno, cronologia invariata):
+- `Errore: prompt sconosciuto '/xyz'. Scrivere /prompt per l'elenco.` (i nomi distinguono le maiuscole);
+- `Errore: /scheda_articolo richiede: <codice>.`;
+- `Errore: nessun articolo con codice 'XYZ'.` (dal server);
+- `Errore: archivio non disponibile.` se il server «archivio» è terminato a metà sessione.
+
+Ctrl-C mentre si attende il prompt annulla solo la richiesta (`(turno annullato)`), come durante un turno.
+
+Riga di log (`LOG_LEVEL=INFO`): `prompt: /scheda_articolo {'codice': 'MIS-001'}`. Un prompt nuovo aggiunto al
+server compare in `/prompt` senza modifiche alla CLI.
+
 ## Strumenti
 Il modello li richiede tramite tool calling; il programma li esegue davvero (registro in
 `src/assistente/strumenti/`).
@@ -342,8 +363,8 @@ con versione fissata, per lo più per i trasporti HTTP e l'autenticazione (`star
 ```powershell
 .venv\Scripts\python.exe -m pytest
 ```
-I test non richiedono un modello attivo né Internet (esito verificato il 2026-11-10: 661 passati, 39
-deselezionati: 37 `reale` e 2 `rete`).
+I test non richiedono un modello attivo né Internet (esito verificato il 2026-11-10: 692 passati, 40
+deselezionati: 38 `reale` e 2 `rete`).
 
 Prova con Open-Meteo vero (Internet, senza modello; esclusa di default, marker `rete`):
 ```powershell
@@ -549,6 +570,25 @@ $env:LOG_LEVEL = "INFO"
 → in entrambi i casi uscita 0, riga `contesto: letta la resource archivio://inventario/categorie (7 categorie)`
 e risposta «Le categorie disponibili nell'inventario del laboratorio sono: alimentatori, attrezzi, cavi e
 connettori, componenti passivi, schede e microcontrollori, sicurezza, strumenti di misura.»
+
+Prompt dell'archivio (prompt MCP, 2026-11-10, `google/gemma-4-e2b`), da Git Bash:
+```bash
+CITTA_PATRONO=Pordenone .venv/Scripts/python.exe -m pytest -m reale -v -s
+```
+→ 31 passate, 6 xfailed (limiti noti del revisore e del riassunto), 1 xpassed, 1201 s. Prova nuova
+`test_il_modello_usa_la_scheda_articolo`: il testo di `/scheda_articolo MIS-001` passa il router e l'agente
+chiama `dettaglio_articolo` ed `elenca_note` con `MIS-001` (2 su 2 anche da sola).
+
+Prova manuale da PowerShell e con Docker (dopo `docker compose build`, riuscito):
+```powershell
+$env:LOG_LEVEL = "INFO"
+"/prompt", "/scheda_articolo mis-001", "/scheda_articolo XYZ", "esci" | .venv\Scripts\python.exe avvia.py
+"/prompt", "/scheda_articolo MIS-001", "esci" | docker compose run --rm -T -e LOG_LEVEL=INFO assistente
+```
+→ uscita 0 in entrambi i casi: elenco `/scheda_articolo <codice> — Scheda di un articolo dell'inventario con
+le sue note.`, riga `(prompt) Dammi i dettagli dell'articolo MIS-001 e le note che lo riguardano.`, chiamate a
+`dettaglio_articolo` ed `elenca_note`, risposta con i dati del multimetro; da PowerShell
+`/scheda_articolo XYZ` → `Errore: nessun articolo con codice 'XYZ'.` senza turno.
 
 ## Diagnosi
 - **`WARNING assistente.cli contesto non disponibile: ...`**: all'avvio la resource delle categorie non è
