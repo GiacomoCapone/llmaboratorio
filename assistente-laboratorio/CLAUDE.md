@@ -4,7 +4,7 @@ Progetto del corso «Deep Learning e LLM: costruire chatbot e agenti».
 La cartella del progetto è `assistente-laboratorio/`.
 
 ## Struttura e comandi
-- Codice in `src/assistente/` (`config`, `modello`, `strumenti/`, `router`, `revisore`, `riassunto`, `grafo`, `mcp_client`, `cli`); test in `tests/`,
+- Codice in `src/assistente/` (`config`, `modello`, `strumenti/`, `router`, `revisore`, `riassunto`, `grafo`, `mcp_client`, `avvio`, `servizio`, `cli`); test in `tests/`,
   prove con LM Studio in `tests/reale/`; specifica e piano in `docs/superpowers/`.
 - `strumenti/` è un pacchetto: un modulo per strumento e il registro (`crea_strumenti`) in
   `__init__.py`; il grafo esegue gli strumenti per nome senza conoscerli.
@@ -18,6 +18,8 @@ La cartella del progetto è `assistente-laboratorio/`.
 - Avvio: `python avvia.py` da qualunque cartella (usa il `.venv`, legge il `.env` del progetto,
   senza variabili né `PYTHONPATH`);
   con Docker: `docker compose run --rm assistente`.
+- Servizio HTTP senza stato (Starlette + uvicorn): `python avvia.py --http` (`HTTP_HOST`, `HTTP_PORTA`);
+  con Docker: `docker compose up -d agente` (porta `127.0.0.1:8000`).
 - Prova con Open-Meteo vero (Internet, senza modello): `python -m pytest -m rete -v` (esclusa di default).
 - Dettagli di configurazione e diagnosi nel `README.md`.
 
@@ -44,6 +46,8 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
 - offre all'utente i prompt MCP dell'archivio come comandi `/nome argomenti` (`/prompt` li elenca), a
   partire da `scheda_articolo`;
 - offre note del laboratorio persistenti (aggiunta, elenco, eliminazione), salvate in SQLite dallo stesso server;
+- è offerto anche come servizio HTTP senza stato (Starlette + uvicorn): ogni richiesta porta la cronologia e
+  chi chiama la custodisce;
 - si avvia anche con Docker Compose.
 
 ## Confini

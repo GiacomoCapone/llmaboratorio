@@ -45,7 +45,9 @@ Variabili: `LMSTUDIO_BASE_URL` (default nell'esempio `http://localhost:1234/v1`)
 `Pordenone`), `NOTE_DB` (facoltativa, percorso del database delle note; vedi «Note del laboratorio») e
 `AMBITO_FILE` (facoltativa, file che descrive l'ambito del router; default `ambito.txt`, vedi «Ambito e
 router»), `MAX_REVISIONI` (default 2, intero ≥ 1; vedi «Revisore delle risposte») e
-`RIASSUNTO_SOGLIA_TOKEN` (default 3000, intero ≥ 1; vedi «Riassunto della cronologia»). Un valore non
+`RIASSUNTO_SOGLIA_TOKEN` (default 3000, intero ≥ 1; vedi «Riassunto della cronologia»),
+`HTTP_HOST` (default `127.0.0.1`, indirizzo di ascolto del servizio HTTP) e `HTTP_PORTA` (default 8000,
+intero da 1 a 65535; vedi «Servizio HTTP»). Un valore non
 ammesso per `LMSTUDIO_REASONING_EFFORT` o `FUSO_PREDEFINITO`, o una città non presente in `src/assistente/strumenti/festivita.json`, ferma l'avvio con un errore (uscita 1). Per
 una città sconosciuta il messaggio è `Città del patrono sconosciuta: '<valore>'. Città disponibili: ...
 (file ...)`; verificato il 2026-11-03 con `CITTA_PATRONO=Milano` (uscita 1).
@@ -250,6 +252,89 @@ Ctrl-C mentre si attende il prompt annulla solo la richiesta (`(turno annullato)
 Riga di log (`LOG_LEVEL=INFO`): `prompt: /scheda_articolo {'codice': 'MIS-001'}`. Un prompt nuovo aggiunto al
 server compare in `/prompt` senza modifiche alla CLI.
 
+## Servizio HTTP
+Lo stesso agente (router, agente con strumenti, revisore, riassunto) è offerto anche come servizio HTTP
+**senza stato**, pensato per essere chiamato da un altro programma (il back-end dei prossimi step). Il servizio
+non conserva conversazioni: ogni richiesta porta la `cronologia` e la risposta restituisce quella aggiornata,
+che chi chiama custodisce e rimanda al turno successivo, tale e quale (sono i messaggi del grafo serializzati
+con `messages_to_dict`: domande, risposte, chiamate e risultati degli strumenti, riassunto). Si serve **un solo
+turno alla volta**: le richieste concorrenti attendono in fila. Starlette + uvicorn, già in `requirements.txt`
+(dipendenze di `mcp`); nessuna autenticazione né HTTPS: per questo l'indirizzo predefinito è solo locale.
+
+Avvio (stessi prerequisiti e `.env` della CLI; il servizio resta in primo piano, Ctrl-C lo ferma):
+```powershell
+python avvia.py --http
+```
+Ascolta su `http://127.0.0.1:8000` (`HTTP_HOST`, `HTTP_PORTA`). Configurazione, modello e archivio sono
+verificati prima dell'avvio: un errore stampa `Errore: ...` ed esce con 1, come per la CLI. Un argomento
+diverso da `--http` stampa `Uso: python avvia.py [--http]` ed esce con 2. Righe di log (`LOG_LEVEL=INFO`, su
+stderr): `servizio in ascolto su http://127.0.0.1:8000`, `turno: <n> messaggi in ingresso, <s> s`,
+`prompt: <nome> <argomenti>`, `WARNING ... turno fallito: <causa>`.
+
+### Endpoint
+Corpi JSON in UTF-8; gli errori hanno la forma `{"errore": "<messaggio>"}`.
+
+- `GET /salute` → `200 {"stato": "ok"}`. Non chiama il modello.
+- `GET /prompt` → `200 {"prompt": [{"nome": "scheda_articolo", "argomenti": ["codice"], "descrizione": "..."}]}`
+  (i prompt MCP dell'archivio, gli stessi di `/prompt` nella CLI).
+- `POST /turno`, con **esattamente uno** fra `domanda` e `prompt`:
+  ```json
+  {"cronologia": [], "domanda": "Che ore sono a Tokyo?"}
+  {"cronologia": [], "prompt": {"nome": "scheda_articolo", "argomenti": {"codice": "MIS-001"}}}
+  ```
+  `cronologia` è facoltativa (default `[]`); `domanda` è un testo non vuoto; gli `argomenti` del prompt sono
+  testi non vuoti con i nomi dichiarati da `/prompt`. Risposta `200`:
+  ```json
+  {"domanda": "...", "risposta": "...", "cronologia": [], "interrotto": false}
+  ```
+  `domanda` è il testo eseguito (con un prompt, quello generato dall'archivio); `risposta` è il testo da
+  mostrare (se il modello non produce nulla: `(il modello non ha prodotto una risposta)`); `cronologia` è
+  quella da rimandare; con `interrotto: true` (tetto `MAX_PASSAGGI`) è la cronologia ricevuta, invariata.
+
+Errori di `/turno`:
+| Codice | Quando | Esempio di `errore` |
+| --- | --- | --- |
+| 400 | corpo non valido, `domanda`/`prompt` insieme o assenti, `domanda` vuota, `cronologia` non ricostruibile, prompt sconosciuto o argomenti errati; il turno non parte | `'domanda' deve essere un testo non vuoto.` |
+| 422 | il server «archivio» rifiuta il prompt (codice inesistente, archivio non disponibile); il turno non parte | `nessun articolo con codice 'XYZ'.` |
+| 500 | eccezione durante il turno; il servizio resta attivo e il lock è libero | `turno fallito: <causa>` |
+
+Rotte o metodi sconosciuti: 404/405 predefiniti di Starlette.
+
+### Esempi da PowerShell
+In un'altra finestra, con il servizio attivo:
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/salute
+Invoke-RestMethod http://127.0.0.1:8000/prompt
+$r = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/turno -ContentType 'application/json; charset=utf-8' -Body (@{domanda='Che ore sono a Tokyo?'} | ConvertTo-Json) -TimeoutSec 600
+$r.risposta
+$r.cronologia.Count
+$r2 = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/turno -ContentType 'application/json; charset=utf-8' -Body (@{domanda='E a Roma?'; cronologia=$r.cronologia} | ConvertTo-Json -Depth 20) -TimeoutSec 600
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/turno -ContentType 'application/json; charset=utf-8' -Body (@{prompt=@{nome='scheda_articolo'; argomenti=@{codice='MIS-001'}}} | ConvertTo-Json -Depth 5) -TimeoutSec 600
+```
+Verificato il 2026-11-13 (`google/gemma-4-e2b`): `/salute` → `{"stato":"ok"}`; due turni concatenati (Tokyo, poi
+Roma con `cronologia=$r.cronologia`) hanno portato la cronologia da 4 a 8 messaggi; una `domanda` vuota ha dato
+400; con Docker `/salute` ha risposto come in locale e `scheda_articolo` con codice `XYZ` ha dato 422
+`nessun articolo con codice 'XYZ'.`
+
+### Con Docker Compose
+Il servizio `agente` (stessa immagine; ascolta su `0.0.0.0` dentro il container e la porta è pubblicata solo
+sull'host locale, `127.0.0.1:8000`) si usa in secondo piano:
+```powershell
+docker compose build
+docker compose up -d agente
+Invoke-RestMethod http://127.0.0.1:8000/salute
+docker compose logs agente
+docker compose stop agente
+```
+Verificato il 2026-11-13: build riuscita, `/salute` → `{"stato":"ok"}`, due turni concatenati (4 → 9 messaggi,
+con un `scheda_articolo`), `docker compose stop agente` → uscita 0 del container, con `Finished server process`
+nei log. Il servizio `assistente` (CLI interattiva) è invariato. Come la CLI, il servizio e il container
+`assistente` non vanno usati insieme con lo stesso `note.db`; per cambiare porta sull'host modificare la
+mappatura `ports` di `compose.yaml`.
+
+Ctrl-C su `python avvia.py --http` (uscita 0) è ancora da provare a mano: nelle prove il processo è stato
+chiuso con `Stop-Process`.
+
 ## Strumenti
 Il modello li richiede tramite tool calling; il programma li esegue davvero (registro in
 `src/assistente/strumenti/`).
@@ -356,15 +441,16 @@ stato verificato.
 
 ### Dipendenza `mcp`
 Il catalogo usa l'SDK ufficiale `mcp==2.3.0` (`requirements.txt`). Porta 17 pacchetti in più, tutti
-con versione fissata, per lo più per i trasporti HTTP e l'autenticazione (`starlette`, `uvicorn`, `sse-starlette`,
-`PyJWT`, `cryptography`, ...) che qui non si usano: si usa solo lo stdio. `pywin32` è solo per Windows.
+con versione fissata, per lo più per i trasporti HTTP e l'autenticazione. `starlette` e `uvicorn` servono al servizio HTTP;
+gli altri trasporti HTTP/SSE di `mcp` e l'autenticazione (`sse-starlette`, `PyJWT`, `cryptography`, ...)
+non si usano: verso l'archivio si usa solo lo stdio. `pywin32` è solo per Windows.
 
 ## Test
 ```powershell
 .venv\Scripts\python.exe -m pytest
 ```
-I test non richiedono un modello attivo né Internet (esito verificato il 2026-11-10: 692 passati, 40
-deselezionati: 38 `reale` e 2 `rete`).
+I test non richiedono un modello attivo né Internet (esito verificato il 2026-11-13: 742 passati, 42
+deselezionati: 40 `reale` e 2 `rete`).
 
 Prova con Open-Meteo vero (Internet, senza modello; esclusa di default, marker `rete`):
 ```powershell
@@ -590,7 +676,36 @@ le sue note.`, riga `(prompt) Dammi i dettagli dell'articolo MIS-001 e le note c
 `dettaglio_articolo` ed `elenca_note`, risposta con i dati del multimetro; da PowerShell
 `/scheda_articolo XYZ` → `Errore: nessun articolo con codice 'XYZ'.` senza turno.
 
+Servizio HTTP (2026-11-13, `google/gemma-4-e2b`). Prova reale del servizio, in-process (`TestClient` sul grafo
+vero, database delle note temporaneo): due turni concatenati («Annota che il multimetro MIS-001 ha la
+batteria scarica», poi «Quali note ci sono?» con la cronologia restituita → `elenca_note` e la nota nella
+risposta) e il turno con il prompt `scheda_articolo` `MIS-001` (→ `dettaglio_articolo`):
+```powershell
+.venv\Scripts\python.exe -m pytest -m reale -v -s -k servizio
+```
+→ 2 passate in 163 s. Prove manuali da PowerShell e con Docker: vedi «Servizio HTTP» (esempi ed esiti).
+Osservato: in una chiamata il revisore ha impiegato circa 10 minuti (turno di 613,7 s), per la lentezza del
+modello in LM Studio; in Docker il turno «Che ore sono a Tokyo?» una volta ha avuto risposta senza chiamare
+l'orologio (variabilità del modello).
+Suite reale completa del passo (stesso comando della sezione precedente, eseguito in bash con
+`CITTA_PATRONO=Pordenone` davanti, 2026-11-13): 34 passate, 5 xfailed (limiti noti di revisore e riassunto), 1 xpassed, 1993 s.
+
 ## Diagnosi
+- **Servizio HTTP: porta occupata** (errore di uvicorn all'avvio di `python avvia.py --http`; non provato): un'altra
+  applicazione, o un container `agente` ancora acceso, usa già la porta. Cambiare `HTTP_PORTA` nel `.env`
+  (in Docker la porta dell'host si cambia in `ports` di `compose.yaml`) o fermare l'altro processo
+  (`docker compose stop agente`).
+- **Servizio HTTP: 422 o 500 da `/turno`**: 422 vuol dire che il server «archivio» ha rifiutato il prompt
+  (codice inesistente, archivio non disponibile) e il turno non è partito; 500 che il turno è fallito (per
+  esempio LM Studio non raggiungibile): la causa è nel campo `errore` e nel log `WARNING ... turno fallito`,
+  il servizio resta attivo. Un 400 indica una richiesta da correggere (campo `errore`).
+- **Servizio HTTP: turni lunghi**: con il modello locale un turno può durare minuti (osservato 613,7 s con una
+  revisione molto lenta); `Invoke-RestMethod` ha un timeout proprio, quindi usare `-TimeoutSec 600` (o più).
+  Intanto le altre richieste attendono in fila (un turno alla volta).
+- **Servizio HTTP: lettere accentate sbagliate in Windows PowerShell 5.1** («QuantitÃ »): il servizio
+  dichiara `Content-Type: application/json; charset=utf-8`; per la richiesta indicare
+  `-ContentType 'application/json; charset=utf-8'` come negli esempi, altrimenti PowerShell invia il corpo
+  in un'altra codifica.
 - **`WARNING assistente.cli contesto non disponibile: ...`**: all'avvio la resource delle categorie non è
   stata letta (archivio che non risponde, resource assente). L'assistente parte comunque; la descrizione di
   `cerca_inventario` resta senza l'elenco delle categorie. Il motivo segue i due punti.

@@ -9,6 +9,7 @@ from assistente.config import carica_config
 from assistente.grafo import MESSAGGIO_LIMITE, MESSAGGIO_RIFIUTO, build_graph
 from assistente import mcp_client
 from assistente.mcp_client import ErroreArchivio, PromptArchivio
+from assistente.modello import ErroreModello
 from assistente.riassunto import PREFISSO_RIASSUNTO
 from assistente.strumenti import Strumento, crea_strumenti
 from finti import LlmFinto, RevisoreFinto, RiassuntoreFinto, RouterFinto, richiesta_ora
@@ -192,12 +193,12 @@ def imposta_env(monkeypatch):
 def test_main_archivio_non_avviato(monkeypatch, capsys):
     imposta_env(monkeypatch)
     finto = ArchivioFinto(errore=ErroreArchivio("archivio non avviato: prova"))
-    monkeypatch.setattr("assistente.cli.ClientArchivio", lambda **kwargs: finto)
+    monkeypatch.setattr("assistente.avvio.ClientArchivio", lambda **kwargs: finto)
 
     def non_chiamare(config):
         pytest.fail("verifica_modello chiamata prima dell'archivio")
 
-    monkeypatch.setattr("assistente.cli.verifica_modello", non_chiamare)
+    monkeypatch.setattr("assistente.avvio.verifica_modello", non_chiamare)
     assert main() == 1
     assert "Errore: archivio non avviato: prova" in capsys.readouterr().err
 
@@ -206,12 +207,12 @@ def test_main_passa_gli_strumenti_dell_archivio(monkeypatch):
     imposta_env(monkeypatch)
     definizione = {"type": "function", "function": {"name": "prova_esterna", "parameters": {}}}
     finto = ArchivioFinto([Strumento(definizione, lambda args: "x")])
-    monkeypatch.setattr("assistente.cli.ClientArchivio", lambda **kwargs: finto)
-    monkeypatch.setattr("assistente.cli.verifica_modello", lambda config: None)
-    monkeypatch.setattr("assistente.cli.crea_llm", lambda config: None)
-    monkeypatch.setattr("assistente.cli.crea_router", lambda llm, ambito: None)
-    monkeypatch.setattr("assistente.cli.crea_revisore", lambda llm: None)
-    monkeypatch.setattr("assistente.cli.crea_riassuntore", lambda llm: None)
+    monkeypatch.setattr("assistente.avvio.ClientArchivio", lambda **kwargs: finto)
+    monkeypatch.setattr("assistente.avvio.verifica_modello", lambda config: None)
+    monkeypatch.setattr("assistente.avvio.crea_llm", lambda config: None)
+    monkeypatch.setattr("assistente.avvio.crea_router", lambda llm, ambito: None)
+    monkeypatch.setattr("assistente.avvio.crea_revisore", lambda llm: None)
+    monkeypatch.setattr("assistente.avvio.crea_riassuntore", lambda llm: None)
     nomi = []
 
     def grafo_finto(
@@ -227,7 +228,7 @@ def test_main_passa_gli_strumenti_dell_archivio(monkeypatch):
         nomi.extend(strumenti)
         raise KeyboardInterrupt
 
-    monkeypatch.setattr("assistente.cli.build_graph", grafo_finto)
+    monkeypatch.setattr("assistente.avvio.build_graph", grafo_finto)
     assert main() == 130
     assert "prova_esterna" in nomi
     assert finto.uscito is True
@@ -244,24 +245,24 @@ def test_main_passa_note_db_e_fuso(monkeypatch, tmp_path):
         ricevuti.update(kwargs)
         return ArchivioFinto()
 
-    monkeypatch.setattr("assistente.cli.ClientArchivio", crea_finto)
+    monkeypatch.setattr("assistente.avvio.ClientArchivio", crea_finto)
 
     def interrompi(config):
         raise KeyboardInterrupt
 
-    monkeypatch.setattr("assistente.cli.verifica_modello", interrompi)
+    monkeypatch.setattr("assistente.avvio.verifica_modello", interrompi)
     assert main() == 130
     assert ricevuti["ambiente"] == {"NOTE_DB": str(percorso), "FUSO_PREDEFINITO": "UTC"}
 
 
 def test_main_ctrl_c_all_avvio(monkeypatch, capsys):
     imposta_env(monkeypatch)
-    monkeypatch.setattr("assistente.cli.ClientArchivio", lambda **kwargs: ArchivioFinto())
+    monkeypatch.setattr("assistente.avvio.ClientArchivio", lambda **kwargs: ArchivioFinto())
 
     def interrompi(config):
         raise KeyboardInterrupt
 
-    monkeypatch.setattr("assistente.cli.verifica_modello", interrompi)
+    monkeypatch.setattr("assistente.avvio.verifica_modello", interrompi)
     assert main() == 130
     assert capsys.readouterr().err.strip() != ""
 
@@ -298,10 +299,10 @@ def test_turno_rifiutato_resta_in_cronologia():
 
 def test_main_passa_il_router(monkeypatch):
     imposta_env(monkeypatch)
-    monkeypatch.setattr("assistente.cli.ClientArchivio", lambda **kwargs: ArchivioFinto())
-    monkeypatch.setattr("assistente.cli.verifica_modello", lambda config: None)
+    monkeypatch.setattr("assistente.avvio.ClientArchivio", lambda **kwargs: ArchivioFinto())
+    monkeypatch.setattr("assistente.avvio.verifica_modello", lambda config: None)
     llm_finto = object()
-    monkeypatch.setattr("assistente.cli.crea_llm", lambda config: llm_finto)
+    monkeypatch.setattr("assistente.avvio.crea_llm", lambda config: llm_finto)
     router_finto = object()
     ricevuti = {}
 
@@ -322,10 +323,10 @@ def test_main_passa_il_router(monkeypatch):
         ricevuti["router"] = router
         raise KeyboardInterrupt
 
-    monkeypatch.setattr("assistente.cli.crea_router", crea_router_finto)
-    monkeypatch.setattr("assistente.cli.crea_revisore", lambda llm: None)
-    monkeypatch.setattr("assistente.cli.crea_riassuntore", lambda llm: None)
-    monkeypatch.setattr("assistente.cli.build_graph", grafo_finto)
+    monkeypatch.setattr("assistente.avvio.crea_router", crea_router_finto)
+    monkeypatch.setattr("assistente.avvio.crea_revisore", lambda llm: None)
+    monkeypatch.setattr("assistente.avvio.crea_riassuntore", lambda llm: None)
+    monkeypatch.setattr("assistente.avvio.build_graph", grafo_finto)
     assert main() == 130
     assert ricevuti["llm"] is llm_finto
     assert ricevuti["ambito"] == carica_config().ambito
@@ -367,11 +368,11 @@ def test_turno_dopo_revisione_cronologia_pulita():
 
 def test_main_passa_il_revisore(monkeypatch):
     imposta_env(monkeypatch)
-    monkeypatch.setattr("assistente.cli.ClientArchivio", lambda **kwargs: ArchivioFinto())
-    monkeypatch.setattr("assistente.cli.verifica_modello", lambda config: None)
+    monkeypatch.setattr("assistente.avvio.ClientArchivio", lambda **kwargs: ArchivioFinto())
+    monkeypatch.setattr("assistente.avvio.verifica_modello", lambda config: None)
     llm_finto = object()
-    monkeypatch.setattr("assistente.cli.crea_llm", lambda config: llm_finto)
-    monkeypatch.setattr("assistente.cli.crea_router", lambda llm, ambito: None)
+    monkeypatch.setattr("assistente.avvio.crea_llm", lambda config: llm_finto)
+    monkeypatch.setattr("assistente.avvio.crea_router", lambda llm, ambito: None)
     revisore_finto = object()
     ricevuti = {}
 
@@ -392,9 +393,9 @@ def test_main_passa_il_revisore(monkeypatch):
         ricevuti.update(revisore=revisore, max_revisioni=max_revisioni)
         raise KeyboardInterrupt
 
-    monkeypatch.setattr("assistente.cli.crea_revisore", crea_revisore_finto)
-    monkeypatch.setattr("assistente.cli.crea_riassuntore", lambda llm: None)
-    monkeypatch.setattr("assistente.cli.build_graph", grafo_finto)
+    monkeypatch.setattr("assistente.avvio.crea_revisore", crea_revisore_finto)
+    monkeypatch.setattr("assistente.avvio.crea_riassuntore", lambda llm: None)
+    monkeypatch.setattr("assistente.avvio.build_graph", grafo_finto)
     assert main() == 130
     assert ricevuti["llm"] is llm_finto
     assert ricevuti["revisore"] is revisore_finto
@@ -403,12 +404,12 @@ def test_main_passa_il_revisore(monkeypatch):
 
 def test_main_passa_il_riassuntore(monkeypatch):
     imposta_env(monkeypatch)
-    monkeypatch.setattr("assistente.cli.ClientArchivio", lambda **kwargs: ArchivioFinto())
-    monkeypatch.setattr("assistente.cli.verifica_modello", lambda config: None)
+    monkeypatch.setattr("assistente.avvio.ClientArchivio", lambda **kwargs: ArchivioFinto())
+    monkeypatch.setattr("assistente.avvio.verifica_modello", lambda config: None)
     llm_finto = object()
-    monkeypatch.setattr("assistente.cli.crea_llm", lambda config: llm_finto)
-    monkeypatch.setattr("assistente.cli.crea_router", lambda llm, ambito: None)
-    monkeypatch.setattr("assistente.cli.crea_revisore", lambda llm: None)
+    monkeypatch.setattr("assistente.avvio.crea_llm", lambda config: llm_finto)
+    monkeypatch.setattr("assistente.avvio.crea_router", lambda llm, ambito: None)
+    monkeypatch.setattr("assistente.avvio.crea_revisore", lambda llm: None)
     riassuntore_finto = object()
     ricevuti = {}
 
@@ -429,8 +430,8 @@ def test_main_passa_il_riassuntore(monkeypatch):
         ricevuti.update(riassuntore=riassuntore, soglia_riassunto=soglia_riassunto)
         raise KeyboardInterrupt
 
-    monkeypatch.setattr("assistente.cli.crea_riassuntore", crea_riassuntore_finto)
-    monkeypatch.setattr("assistente.cli.build_graph", grafo_finto)
+    monkeypatch.setattr("assistente.avvio.crea_riassuntore", crea_riassuntore_finto)
+    monkeypatch.setattr("assistente.avvio.build_graph", grafo_finto)
     assert main() == 130
     assert ricevuti["llm"] is llm_finto
     assert ricevuti["riassuntore"] is riassuntore_finto
@@ -460,12 +461,12 @@ def test_cronologia_compatta_al_turno_dopo():
 
 def prepara_main(monkeypatch, finto):
     imposta_env(monkeypatch)
-    monkeypatch.setattr("assistente.cli.ClientArchivio", lambda **kwargs: finto)
-    monkeypatch.setattr("assistente.cli.verifica_modello", lambda config: None)
-    monkeypatch.setattr("assistente.cli.crea_llm", lambda config: None)
-    monkeypatch.setattr("assistente.cli.crea_router", lambda llm, ambito: None)
-    monkeypatch.setattr("assistente.cli.crea_revisore", lambda llm: None)
-    monkeypatch.setattr("assistente.cli.crea_riassuntore", lambda llm: None)
+    monkeypatch.setattr("assistente.avvio.ClientArchivio", lambda **kwargs: finto)
+    monkeypatch.setattr("assistente.avvio.verifica_modello", lambda config: None)
+    monkeypatch.setattr("assistente.avvio.crea_llm", lambda config: None)
+    monkeypatch.setattr("assistente.avvio.crea_router", lambda llm, ambito: None)
+    monkeypatch.setattr("assistente.avvio.crea_revisore", lambda llm: None)
+    monkeypatch.setattr("assistente.avvio.crea_riassuntore", lambda llm: None)
 
 
 def cerca_finto():
@@ -493,7 +494,7 @@ def descrizione_ricevuta(monkeypatch):
         ]
         raise KeyboardInterrupt
 
-    monkeypatch.setattr("assistente.cli.build_graph", grafo_finto)
+    monkeypatch.setattr("assistente.avvio.build_graph", grafo_finto)
     return ricevuti
 
 
@@ -501,7 +502,7 @@ def test_main_arricchisce_cerca_inventario(monkeypatch, caplog):
     finto = ArchivioFinto([cerca_finto()])
     prepara_main(monkeypatch, finto)
     ricevuti = descrizione_ricevuta(monkeypatch)
-    with caplog.at_level(logging.INFO, logger="assistente.cli"):
+    with caplog.at_level(logging.INFO, logger="assistente.avvio"):
         assert main() == 130
     assert ricevuti["descrizione"] == "Nome esatto. Categorie esistenti: attrezzi, sicurezza."
     assert finto.letti == [mcp_client.URI_CATEGORIE]
@@ -512,7 +513,7 @@ def test_main_contesto_non_disponibile(monkeypatch, caplog):
     guasto = ErroreArchivio("l'archivio non ha risposto entro 10 secondi")
     prepara_main(monkeypatch, ArchivioFinto([cerca_finto()], errore_lettura=guasto))
     ricevuti = descrizione_ricevuta(monkeypatch)
-    with caplog.at_level(logging.INFO, logger="assistente.cli"):
+    with caplog.at_level(logging.INFO, logger="assistente.avvio"):
         assert main() == 130
     assert ricevuti["descrizione"] == "Nome esatto."
     avvisi = [r for r in caplog.records if r.levelno == logging.WARNING]
@@ -524,10 +525,10 @@ def test_main_contesto_non_disponibile(monkeypatch, caplog):
 def test_main_senza_contesto(monkeypatch, capsys):
     guasto = ErroreArchivio("lettura fallita")
     prepara_main(monkeypatch, ArchivioFinto(errore_lettura=guasto))
-    monkeypatch.setattr("assistente.cli.crea_llm", lambda config: LlmFinto([AIMessage("Ciao.")]))
-    monkeypatch.setattr("assistente.cli.crea_router", lambda llm, ambito: RouterFinto("conversazione"))
-    monkeypatch.setattr("assistente.cli.crea_revisore", lambda llm: RevisoreFinto([True]))
-    monkeypatch.setattr("assistente.cli.crea_riassuntore", lambda llm: RiassuntoreFinto())
+    monkeypatch.setattr("assistente.avvio.crea_llm", lambda config: LlmFinto([AIMessage("Ciao.")]))
+    monkeypatch.setattr("assistente.avvio.crea_router", lambda llm, ambito: RouterFinto("conversazione"))
+    monkeypatch.setattr("assistente.avvio.crea_revisore", lambda llm: RevisoreFinto([True]))
+    monkeypatch.setattr("assistente.avvio.crea_riassuntore", lambda llm: RiassuntoreFinto())
     righe = iter(["ciao", "esci"])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(righe))
     assert main() == 0
@@ -674,10 +675,10 @@ def test_senza_prompt_la_barra_va_al_modello():
 
 def test_main_passa_l_archivio_a_ciclo(monkeypatch, capsys):
     prepara_main(monkeypatch, ArchivioFinto())
-    monkeypatch.setattr("assistente.cli.crea_llm", lambda config: LlmFinto([AIMessage("Ciao.")]))
-    monkeypatch.setattr("assistente.cli.crea_router", lambda llm, ambito: RouterFinto("conversazione"))
-    monkeypatch.setattr("assistente.cli.crea_revisore", lambda llm: RevisoreFinto([True]))
-    monkeypatch.setattr("assistente.cli.crea_riassuntore", lambda llm: RiassuntoreFinto())
+    monkeypatch.setattr("assistente.avvio.crea_llm", lambda config: LlmFinto([AIMessage("Ciao.")]))
+    monkeypatch.setattr("assistente.avvio.crea_router", lambda llm, ambito: RouterFinto("conversazione"))
+    monkeypatch.setattr("assistente.avvio.crea_revisore", lambda llm: RevisoreFinto([True]))
+    monkeypatch.setattr("assistente.avvio.crea_riassuntore", lambda llm: RiassuntoreFinto())
     righe = iter(["/prompt", "esci"])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(righe))
     assert main() == 0
@@ -694,3 +695,32 @@ def test_prompt_ctrl_c_durante_la_richiesta():
     grafo, uscite = esegui_ciclo(["/scheda_articolo MIS-001", "ciao"], prompt)
     assert uscite[0] == MESSAGGIO_TURNO_ANNULLATO
     assert domande(grafo) == ["ciao"]
+
+
+def test_main_http_chiama_servi(monkeypatch):
+    imposta_env(monkeypatch)
+    chiamate = []
+    monkeypatch.setattr("assistente.servizio.servi", lambda config: chiamate.append(config))
+    assert main(["--http"]) == 0
+    assert len(chiamate) == 1
+    assert chiamate[0].model == "modello-finto"
+
+
+def test_main_argomento_sconosciuto(monkeypatch, capsys):
+    imposta_env(monkeypatch)
+    monkeypatch.setattr(
+        "assistente.servizio.servi", lambda config: pytest.fail("servi non va chiamata")
+    )
+    assert main(["--boh"]) == 2
+    assert "Uso: python avvia.py [--http]" in capsys.readouterr().err
+
+
+def test_main_http_errore_di_avvio(monkeypatch, capsys):
+    imposta_env(monkeypatch)
+
+    def servi_guasta(config):
+        raise ErroreModello("x")
+
+    monkeypatch.setattr("assistente.servizio.servi", servi_guasta)
+    assert main(["--http"]) == 1
+    assert "Errore: x" in capsys.readouterr().err

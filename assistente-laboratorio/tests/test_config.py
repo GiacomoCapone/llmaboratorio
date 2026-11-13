@@ -246,3 +246,24 @@ def test_soglia_riassunto_non_valida(valore):
     with pytest.raises(ErroreConfigurazione) as errore:
         carica_config({**BASE, "RIASSUNTO_SOGLIA_TOKEN": valore})
     assert "RIASSUNTO_SOGLIA_TOKEN" in str(errore.value)
+
+
+def test_http_predefiniti():
+    cfg = carica_config(BASE)
+    assert (cfg.http_host, cfg.http_porta) == ("127.0.0.1", 8000)
+
+
+def test_http_impostati():
+    cfg = carica_config({**BASE, "HTTP_HOST": " 0.0.0.0 ", "HTTP_PORTA": "9000"})
+    assert (cfg.http_host, cfg.http_porta) == ("0.0.0.0", 9000)
+
+
+def test_http_host_vuoto():
+    assert carica_config({**BASE, "HTTP_HOST": "   "}).http_host == "127.0.0.1"
+
+
+@pytest.mark.parametrize("valore", ["0", "65536", "abc", "-1"])
+def test_http_porta_non_valida(valore):
+    with pytest.raises(ErroreConfigurazione) as errore:
+        carica_config({**BASE, "HTTP_PORTA": valore})
+    assert f"HTTP_PORTA deve essere un intero fra 1 e 65535, trovato {valore!r}." in str(errore.value)

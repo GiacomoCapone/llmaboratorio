@@ -13,3 +13,21 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./dati:/app/dati
+
+  agente:
+    build: .
+    command: ["python", "-m", "assistente", "--http"]
+    env_file: .env
+    environment:
+      # Sovrascrive il valore dell'.env locale: dal container l'host è host.docker.internal
+      LMSTUDIO_BASE_URL: http://host.docker.internal:1234/v1
+      NOTE_DB: /app/dati/note.db
+      # Dentro il container il servizio deve ascoltare su tutte le interfacce
+      HTTP_HOST: 0.0.0.0
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./dati:/app/dati
+    ports:
+      # Pubblicata solo sull'host locale
+      - "127.0.0.1:8000:8000"

@@ -38,6 +38,8 @@ class Config:
     ambito: str = ""
     max_revisioni: int = 2
     soglia_riassunto: int = 3000
+    http_host: str = "127.0.0.1"
+    http_porta: int = 8000
 
 
 def _obbligatoria(env: Mapping[str, str], nome: str) -> str:
@@ -141,6 +143,18 @@ def carica_config(env: Mapping[str, str] | None = None) -> Config:
             f"RIASSUNTO_SOGLIA_TOKEN deve essere un intero positivo, trovato {grezzo_soglia!r}."
         )
 
+    http_host = env.get("HTTP_HOST", "").strip() or "127.0.0.1"
+
+    grezzo_porta = env.get("HTTP_PORTA", "8000")
+    try:
+        http_porta = int(grezzo_porta.strip())
+    except ValueError:
+        http_porta = 0
+    if not 1 <= http_porta <= 65535:
+        raise ErroreConfigurazione(
+            f"HTTP_PORTA deve essere un intero fra 1 e 65535, trovato {grezzo_porta!r}."
+        )
+
     return Config(
         base_url,
         model,
@@ -153,4 +167,6 @@ def carica_config(env: Mapping[str, str] | None = None) -> Config:
         ambito,
         max_revisioni,
         soglia_riassunto,
+        http_host,
+        http_porta,
     )

@@ -45,4 +45,4 @@ except ModuleNotFoundError as errore:
     )
     raise SystemExit(1) from None
 
-raise SystemExit(main())
+raise SystemExit(main(sys.argv[1:]))
