@@ -35,7 +35,14 @@ if not _nel_venv() and PYTHON_VENV.is_file():
 sys.path.insert(0, str(RADICE / "src"))
 
 try:
-    from assistente.cli import main
+    if sys.argv[1:] == ["--backend"]:
+        from backend.__main__ import main
+
+        argomenti = []
+    else:
+        from assistente.cli import main
+
+        argomenti = sys.argv[1:]
 except ModuleNotFoundError as errore:
     print(
         f"Errore: dipendenza mancante ({errore.name}). Creare l'ambiente del progetto con\n"
@@ -45,4 +52,4 @@ except ModuleNotFoundError as errore:
     )
     raise SystemExit(1) from None
 
-raise SystemExit(main(sys.argv[1:]))
+raise SystemExit(main(argomenti))

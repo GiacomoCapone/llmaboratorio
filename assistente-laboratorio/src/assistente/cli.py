@@ -120,7 +120,7 @@ def ciclo(grafo, leggi: Callable[[], str], scrivi: Callable[[str], None], prompt
 def main(argv: list[str] | None = None) -> int:
     argv = [] if argv is None else argv
     if argv not in ([], ["--http"]):
-        print("Uso: python avvia.py [--http]", file=sys.stderr)
+        print("Uso: python avvia.py [--http | --backend]", file=sys.stderr)
         return 2
     try:
         config = carica_config()

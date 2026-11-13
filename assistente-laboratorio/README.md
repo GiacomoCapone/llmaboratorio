@@ -2,7 +2,8 @@
 
 Applicazione da terminale in Python che conversa con un modello locale servito da LM Studio.
 Il flusso è un grafo LangGraph esplicito; la cronologia vale per la sola sessione (nessuna
-persistenza); solo le note del laboratorio (vedi «Strumenti») restano in un database SQLite. Il modello può chiamare lo strumento orologio (fuso orario esplicito), eseguito
+persistenza); solo le note del laboratorio (vedi «Strumenti») restano in un database SQLite; un back-end
+separato (vedi «Back-end delle conversazioni») conserva più conversazioni in PostgreSQL. Il modello può chiamare lo strumento orologio (fuso orario esplicito), eseguito
 davvero dal programma. LM Studio resta sul computer host e non è containerizzato.
 
 ## Prerequisiti
@@ -59,6 +60,27 @@ e spazi esterni ignorati). Per aggiungere una città: aggiungere in `patroni` di
 
 `FUSO_PREDEFINITO` è il fuso usato dall'orologio quando la domanda non indica un luogo
 («che ore sono»); il modello lo legge nella definizione dello strumento.
+
+Per il back-end delle conversazioni (vedi «Back-end delle conversazioni») servono anche queste variabili,
+tutte nel `.env`:
+- `POSTGRES_USER`, `POSTGRES_DB`, `POSTGRES_PASSWORD`: utente, nome e password del database PostgreSQL;
+  li legge Compose per creare il servizio `postgres` e per costruire il `DATABASE_URL` del servizio `backend`.
+  `.env.example` ha utente e nome di esempio; la password va scelta da chi configura (il `.env` non si versiona).
+  Nella password usare solo lettere, cifre, `-` e `_`: altri caratteri rompono gli indirizzi (`DATABASE_URL`) e
+  `$` è espanso da Compose.
+- `DATABASE_URL` (obbligatoria solo per `python avvia.py --backend`): indirizzo del database per l'avvio locale,
+  per esempio `postgresql://laboratorio:<password>@127.0.0.1:5433/laboratorio`. **Va tenuto allineato a
+  `POSTGRES_*`** (stessi utente, password e nome): se la password è diversa, il database rifiuta l'accesso
+  (vedi «Diagnosi»). La porta dell'host è la **5433** perché la 5432 è spesso occupata da un PostgreSQL
+  installato sul computer (sul computer di sviluppo c'è un servizio PostgreSQL di Windows sulla 5432).
+- `AGENTE_URL` (default `http://127.0.0.1:8000`, una `/` finale è tolta), `AGENTE_TIMEOUT` (default 900, secondi
+  di attesa di un turno, numero maggiore di 0), `BACKEND_HOST` (default `127.0.0.1`) e `BACKEND_PORTA` (default
+  8001, intero da 1 a 65535). Un valore non ammesso ferma l'avvio con `Errore: ...` (uscita 1).
+
+Da quando `compose.yaml` ha il servizio `postgres`, **Compose richiede `POSTGRES_USER`, `POSTGRES_DB` e
+`POSTGRES_PASSWORD` nel `.env` per qualunque comando**, anche per `docker compose run --rm assistente`
+(la sostituzione `${POSTGRES_...:?}` fa fallire il comando se mancano). Il percorso `docker compose run --rm
+assistente` con queste variabili presenti non è stato riprovato dopo lo step 7.
 
 `LMSTUDIO_REASONING_EFFORT` regola il ragionamento nascosto del modello: con `none` ogni chiamata
 dura pochi secondi; `low` (o superiore) può rendere più affidabile la scelta dello strumento con
@@ -267,7 +289,7 @@ python avvia.py --http
 ```
 Ascolta su `http://127.0.0.1:8000` (`HTTP_HOST`, `HTTP_PORTA`). Configurazione, modello e archivio sono
 verificati prima dell'avvio: un errore stampa `Errore: ...` ed esce con 1, come per la CLI. Un argomento
-diverso da `--http` stampa `Uso: python avvia.py [--http]` ed esce con 2. Righe di log (`LOG_LEVEL=INFO`, su
+diverso da `--http` e `--backend` stampa `Uso: python avvia.py [--http | --backend]` ed esce con 2. Righe di log (`LOG_LEVEL=INFO`, su
 stderr): `servizio in ascolto su http://127.0.0.1:8000`, `turno: <n> messaggi in ingresso, <s> s`,
 `prompt: <nome> <argomenti>`, `WARNING ... turno fallito: <causa>`.
 
@@ -334,6 +356,108 @@ mappatura `ports` di `compose.yaml`.
 
 Ctrl-C su `python avvia.py --http` (uscita 0) è ancora da provare a mano: nelle prove il processo è stato
 chiuso con `Stop-Process`.
+
+## Back-end delle conversazioni
+L'agente dello step precedente è senza stato: chi lo chiama deve custodire la cronologia. Il **back-end** è quel
+chiamante: conserva in PostgreSQL più conversazioni (si creano, si elencano, si riaprono, si eliminano; nessun
+login), chiama l'agente a ogni messaggio e offre un'API JSON pensata per il front-end del prossimo step. Il
+codice è in `src/backend/` (`app.py`, `deposito.py`, `agente.py`, `config.py`); non importa `assistente` né
+`archivio` e parla con l'agente solo via HTTP (`POST /turno`). Come l'agente, non ha autenticazione né HTTPS:
+ascolta solo su `127.0.0.1`.
+
+Per ogni conversazione il back-end salva **due cose diverse**:
+- i **messaggi visibili** (domande e risposte come sono state scambiate): riaprendo una conversazione si vedono
+  tutti, anche dopo che l'agente ha riassunto i turni vecchi;
+- la **cronologia dell'agente**, opaca, che rimanda all'agente a ogni messaggio e che può essere più corta
+  (riassunto) e più ricca (chiamate agli strumenti) della chat.
+
+Un turno è salvato in una sola transazione dopo la risposta dell'agente: se l'agente fallisce non si salva
+nulla. Il titolo di una conversazione è `Nuova conversazione` fino al primo messaggio, poi i primi 60 caratteri
+della prima domanda (59 più `…` se è più lunga). Con un prompt MCP nella chat compare ciò che la persona ha
+scritto, per esempio `/scheda_articolo MIS-001`. **Un solo turno alla volta per ogni conversazione**: un secondo
+messaggio mentre il primo è in corso riceve `409` (non attende); conversazioni diverse non si bloccano.
+
+### Avvio locale
+Servono PostgreSQL attivo (`docker compose up -d postgres`) e `DATABASE_URL` nel `.env`; l'agente dev'essere avviato
+a parte, in un'altra finestra, ma può partire anche dopo (la sua assenza emerge al primo messaggio come 502):
+```powershell
+python avvia.py --http
+python avvia.py --backend
+```
+Il back-end ascolta su `http://127.0.0.1:8001` (`BACKEND_HOST`, `BACKEND_PORTA`) e, all'avvio, crea le tabelle se
+mancano. Un database non raggiungibile stampa `Errore: database non raggiungibile: <causa>` ed esce con 1.
+Righe di log (`LOG_LEVEL=INFO`, su stderr): `backend in ascolto su http://127.0.0.1:8001`,
+`messaggio: conversazione <id>, <s> s`, `WARNING ... errore del database: <causa>`,
+`WARNING ... agente non disponibile: <causa>`. I comandi sono stati provati chiudendo i processi con
+`Stop-Process`: il comportamento con Ctrl-C e i relativi codici di uscita di `--backend` **non sono stati verificati**.
+
+### Endpoint
+Corpi JSON in UTF-8 (`Content-Type: application/json; charset=utf-8`); gli errori hanno la forma
+`{"errore": "<messaggio>"}`; le date sono ISO 8601 con fuso.
+
+| Metodo e percorso | Esito |
+| --- | --- |
+| `GET /salute` | `200 {"stato": "ok"}`; non tocca database né agente |
+| `GET /prompt` | inoltra `GET /prompt` dell'agente (stesso corpo); agente non raggiungibile: 502 |
+| `GET /conversazioni` | `200 {"conversazioni": [{"id", "titolo", "creata", "aggiornata"}]}`, la più recente per prima |
+| `POST /conversazioni` | `201 {"id", "titolo", "creata", "aggiornata"}` (il corpo è ignorato) |
+| `GET /conversazioni/{id}` | `200` con i campi precedenti più `"messaggi": [{"ruolo", "testo", "ora"}]` in ordine; 404 |
+| `DELETE /conversazioni/{id}` | `204` senza corpo; 404 |
+| `POST /conversazioni/{id}/messaggi` | corpo con **esattamente uno** fra `{"domanda": "<testo>"}` e `{"prompt": {"nome": "...", "argomenti": {...}}}`; `200 {"risposta": "...", "messaggi": [<utente>, <assistente>]}` |
+
+Errori:
+| Codice | Quando | `errore` |
+| --- | --- | --- |
+| 400 | corpo non valido, `domanda` e `prompt` insieme o assenti, `prompt` malformato; oppure 400 dell'agente (domanda vuota, prompt sconosciuto, argomenti errati), inoltrato tale e quale | `corpo della richiesta non valido: atteso un oggetto JSON.`, `indicare esattamente uno fra 'domanda' e 'prompt'.`, `'domanda' deve essere un testo non vuoto.`, `'prompt' non valido: atteso un oggetto con 'nome' e 'argomenti'.` |
+| 404 | conversazione inesistente, anche con un `{id}` non intero o eliminata durante il turno (nulla è salvato) | `conversazione 999 inesistente.` |
+| 409 | turno già in corso sulla stessa conversazione | `turno in corso per la conversazione 1.` |
+| 422 | l'archivio rifiuta il prompt (inoltrato dall'agente) | `nessun articolo con codice 'XYZ'.` |
+| 500 | errore del database; nulla è salvato | `errore del database: <causa>` |
+| 500 | eccezione inattesa nel back-end (registrata nel log con la traccia) | `errore interno: <causa>` |
+| 502 | agente spento, in avvio, lento oltre `AGENTE_TIMEOUT` o in errore (500 o risposta non JSON); nulla è salvato | `agente non disponibile: <causa>` |
+
+Il controllo del 409 è in memoria nel processo: vale per un solo processo back-end, che è il caso previsto.
+
+### Esempi da PowerShell
+Con PostgreSQL, agente e back-end attivi, in un'altra finestra:
+```powershell
+Invoke-RestMethod http://127.0.0.1:8001/salute
+Invoke-RestMethod http://127.0.0.1:8001/prompt
+$c = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8001/conversazioni
+$m1 = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8001/conversazioni/$($c.id)/messaggi" -ContentType 'application/json; charset=utf-8' -Body (@{domanda='Che ore sono a Tokyo?'} | ConvertTo-Json) -TimeoutSec 900
+$m2 = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8001/conversazioni/$($c.id)/messaggi" -ContentType 'application/json; charset=utf-8' -Body (@{prompt=@{nome='scheda_articolo'; argomenti=@{codice='MIS-001'}}} | ConvertTo-Json -Depth 5) -TimeoutSec 900
+Invoke-RestMethod http://127.0.0.1:8001/conversazioni
+Invoke-RestMethod http://127.0.0.1:8001/conversazioni/1
+Invoke-WebRequest -Method Delete -Uri http://127.0.0.1:8001/conversazioni/1 -UseBasicParsing
+```
+Verificato il 2026-11-13 in locale (`google/gemma-4-e2b`, la conversazione creata aveva id 1): `/salute` e `/prompt`
+rispondono; `POST /conversazioni` → id 1 con titolo `Nuova conversazione`; «Che ore sono a Tokyo?» → 200 in 30 s con
+l'ora giusta; il prompt `scheda_articolo` `MIS-001` → 200 in 71 s (la risposta riguardava solo le note: variabilità del
+modello); l'elenco mostra il titolo uguale alla prima domanda; `GET /conversazioni/1` restituisce 4 messaggi (il terzo,
+dell'utente, è `/scheda_articolo MIS-001`) con gli accenti corretti; una conversazione inesistente → 404
+`conversazione 999 inesistente.`; un corpo `{}` → 400; con l'agente spento un messaggio → 502
+`agente non disponibile: [WinError 10061] ...` e i messaggi della conversazione restano 4; `DELETE` → 204 e la
+lettura successiva → 404. I turni lunghi richiedono `-TimeoutSec` alto (vedi «Diagnosi»).
+
+### Con Docker Compose
+Il servizio `postgres` (immagine `postgres:18.7`, porta pubblicata solo sull'host locale, `127.0.0.1:5433`, dati nel
+volume con nome `pgdati`, quindi conservati fra un avvio e l'altro) e il servizio `backend` (stessa immagine
+del progetto, `127.0.0.1:8001`, `DATABASE_URL` costruito da Compose con `POSTGRES_*` e host `postgres`, `AGENTE_URL`
+`http://agente:8000`) si usano in secondo piano con l'agente:
+```powershell
+docker compose build
+docker compose up -d postgres agente backend
+Invoke-RestMethod http://127.0.0.1:8001/salute
+docker compose logs backend
+docker compose restart backend
+docker compose stop backend agente
+```
+Verificato il 2026-11-13: build riuscita e avvio dei tre servizi; un messaggio inviato **subito** dopo l'avvio ha
+avuto 502 (`Connection refused`: l'agente è ancora in avvio, atteso), mentre dopo la risposta di `/salute` dell'agente
+(porta 8000) lo stesso messaggio ha dato 200 in 30 s; dopo `docker compose restart backend` la conversazione 2
+(titolo «Che giorno è oggi?», 2 messaggi) era ancora presente grazie al volume; l'arresto ha dato uscita 0. In quella
+prova il modello ha risposto «mercoledì» a «Che giorno è oggi?» mentre era venerdì: errore del modello, non del
+back-end. Il comando `docker compose stop backend agente` lascia attivo `postgres`.
 
 ## Strumenti
 Il modello li richiede tramite tool calling; il programma li esegue davvero (registro in
@@ -449,8 +573,18 @@ non si usano: verso l'archivio si usa solo lo stdio. `pywin32` è solo per Windo
 ```powershell
 .venv\Scripts\python.exe -m pytest
 ```
-I test non richiedono un modello attivo né Internet (esito verificato il 2026-11-13: 742 passati, 42
-deselezionati: 40 `reale` e 2 `rete`).
+I test non richiedono un modello attivo né Internet (esito verificato il 2026-11-13: 806 passati, 51
+deselezionati: `reale`, `rete` e `postgres`).
+
+Prove del back-end con PostgreSQL vero (senza modello; escluse di default, marcatore `postgres`): richiedono il
+servizio `postgres` attivo e `DATABASE_URL` nel `.env`; ogni prova lavora in uno schema temporaneo, creato e
+rimosso dalla prova stessa, quindi non tocca le conversazioni salvate. Il marcatore `postgres` seleziona anche la
+prova reale del back-end, da escludere con `not reale`:
+```powershell
+docker compose up -d postgres
+.venv\Scripts\python.exe -m pytest -m "postgres and not reale" -v
+```
+Esito del 2026-11-13: 8 passate (su `127.0.0.1:5433`); con `-m postgres` ne passano 9, perché è inclusa la prova reale.
 
 Prova con Open-Meteo vero (Internet, senza modello; esclusa di default, marker `rete`):
 ```powershell
@@ -690,7 +824,42 @@ l'orologio (variabilità del modello).
 Suite reale completa del passo (stesso comando della sezione precedente, eseguito in bash con
 `CITTA_PATRONO=Pordenone` davanti, 2026-11-13): 34 passate, 5 xfailed (limiti noti di revisore e riassunto), 1 xpassed, 1993 s.
 
+Back-end delle conversazioni (2026-11-13, `google/gemma-4-e2b`, PostgreSQL in Docker su `127.0.0.1:5433`). Prova reale
+`test_backend_due_messaggi` (`tests/reale/test_backend_reale.py`): back-end e agente in-process (`TestClient` con il
+grafo vero), schema PostgreSQL temporaneo; «Annota che il multimetro MIS-001 ha la batteria scarica», poi «Quali note
+ci sono?» → entrambe 200, la seconda risposta contiene «batteria», la lettura mostra 4 messaggi e il titolo è la
+prima domanda:
+```powershell
+.venv\Scripts\python.exe -m pytest -m "reale and postgres" -v -s -k backend
+```
+→ 1 passata in 119 s. Prove manuali da PowerShell e con Docker: vedi «Back-end delle conversazioni» (esempi ed esiti).
+Suite reale completa del passo (stesso comando della sezione dello step 6, eseguito in bash con
+`CITTA_PATRONO=Pordenone` davanti, PostgreSQL attivo, 2026-11-13): 34 passate, 6 xfailed (limiti noti di revisore
+e riassunto; in più rispetto allo step 6 `test_riassunto_conserva_la_nota`, instabile dallo step 4), 1 xpassed, 1531 s.
+
 ## Diagnosi
+- **Back-end: `Errore: database non raggiungibile: ...`** all'avvio di `python avvia.py --backend`: PostgreSQL non è
+  attivo o `DATABASE_URL` è sbagliato. Avviare il database (`docker compose up -d postgres`) e controllare che
+  `DATABASE_URL` abbia la porta **5433** e lo stesso utente, la stessa password e lo stesso nome di
+  `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`. Con una password diversa il database rifiuta l'accesso: se il
+  volume `pgdati` esiste già, la password con cui è stato creato resta quella di allora (non provato): rimettere
+  nel `.env` quella originale oppure eliminare il volume, perdendo le conversazioni.
+- **Back-end: porta 5432 occupata o database sbagliato**: sul computer di sviluppo la 5432 è di un servizio PostgreSQL
+  di Windows, per questo il servizio `postgres` è pubblicato sulla 5433. Con `DATABASE_URL` sulla 5432 si raggiunge
+  quel PostgreSQL, non il container, e l'accesso fallisce.
+- **Compose: errore sulla variabile `POSTGRES_...` mancante** (messaggio non riprodotto) anche per
+  `docker compose run --rm assistente`: mancano `POSTGRES_USER`, `POSTGRES_DB` o `POSTGRES_PASSWORD` nel `.env`; servono per qualunque comando Compose.
+- **Back-end: 502 `agente non disponibile: ...`**: l'agente non risponde. Subito dopo `docker compose up -d` è
+  normale, perché l'agente impiega qualche secondo ad avviarsi (apre l'archivio e controlla il modello): attendere
+  che `Invoke-RestMethod http://127.0.0.1:8000/salute` risponda e ripetere il messaggio. Con l'agente spento
+  (`[WinError 10061]`, `Connection refused`) avviarlo con `python avvia.py --http` o `docker compose up -d agente`.
+  Un turno più lungo di `AGENTE_TIMEOUT` dà lo stesso 502. Nulla viene salvato e la conversazione resta libera;
+  la causa è anche nel log `WARNING ... agente non disponibile`.
+- **Back-end: 409 `turno in corso per la conversazione <id>.`**: un messaggio è già in elaborazione sulla stessa
+  conversazione (con il modello locale può durare minuti). Attendere la risposta del primo; altre conversazioni
+  non sono bloccate.
+- **Back-end: 500 `errore del database: ...`**: il database ha rifiutato la scrittura o la lettura; nulla è salvato
+  (il testo è anche nel log `WARNING ... errore del database`).
 - **Servizio HTTP: porta occupata** (errore di uvicorn all'avvio di `python avvia.py --http`; non provato): un'altra
   applicazione, o un container `agente` ancora acceso, usa già la porta. Cambiare `HTTP_PORTA` nel `.env`
   (in Docker la porta dell'host si cambia in `ports` di `compose.yaml`) o fermare l'altro processo

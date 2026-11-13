@@ -31,3 +31,43 @@ services:
     ports:
       # Pubblicata solo sull'host locale
       - "127.0.0.1:8000:8000"
+
+  backend:
+    build: .
+    command: ["python", "-m", "backend"]
+    env_file: .env
+    environment:
+      # Sovrascrive il valore dell'.env locale: dal container il database è il servizio postgres
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      AGENTE_URL: http://agente:8000
+      # Dentro il container il servizio deve ascoltare su tutte le interfacce
+      BACKEND_HOST: 0.0.0.0
+    ports:
+      # Pubblicata solo sull'host locale
+      - "127.0.0.1:8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      agente:
+        condition: service_started
+
+  postgres:
+    image: postgres:18.7
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?definire POSTGRES_USER nel .env}
+      POSTGRES_DB: ${POSTGRES_DB:?definire POSTGRES_DB nel .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?definire POSTGRES_PASSWORD nel .env}
+    volumes:
+      # L'immagine 18 tiene i dati in /var/lib/postgresql/18/docker: si monta la cartella superiore
+      - pgdati:/var/lib/postgresql
+    ports:
+      # Pubblicata solo sull'host locale, per le prove dall'host; 5433 perché 5432 può essere di un PostgreSQL locale
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdati:

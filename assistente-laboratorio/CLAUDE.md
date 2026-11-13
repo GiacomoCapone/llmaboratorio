@@ -10,6 +10,9 @@ La cartella del progetto è `assistente-laboratorio/`.
   `__init__.py`; il grafo esegue gli strumenti per nome senza conoscerli.
 - `src/archivio/`: server MCP «archivio» (inventario CSV `inventario.csv`), avviato dall'assistente via stdio;
   `mcp_client` lo collega al registro degli strumenti, legge la resource delle categorie e i prompt.
+- `src/backend/`: back-end delle conversazioni (PostgreSQL, API JSON, chiama l'agente `--http`); non importa
+  `assistente` né `archivio`. Avvio: `python avvia.py --backend` (serve PostgreSQL e `DATABASE_URL` nel `.env`);
+  con Docker: `docker compose up -d postgres agente backend` (richiede `POSTGRES_*` nel `.env`).
 - `dati/`: database SQLite delle note del laboratorio (`note.db`), creato al primo avvio, fuori da Git e da
   Docker; in Docker è montato su `/app/dati`.
 - Test automatici (senza modello): `python -m pytest`.
@@ -20,6 +23,8 @@ La cartella del progetto è `assistente-laboratorio/`.
   con Docker: `docker compose run --rm assistente`.
 - Servizio HTTP senza stato (Starlette + uvicorn): `python avvia.py --http` (`HTTP_HOST`, `HTTP_PORTA`);
   con Docker: `docker compose up -d agente` (porta `127.0.0.1:8000`).
+- Prove con PostgreSQL vero (senza modello, `docker compose up -d postgres`):
+  `python -m pytest -m "postgres and not reale" -v` (escluse di default; `-m postgres` include anche la prova reale).
 - Prova con Open-Meteo vero (Internet, senza modello): `python -m pytest -m rete -v` (esclusa di default).
 - Dettagli di configurazione e diagnosi nel `README.md`.
 
@@ -48,6 +53,8 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
 - offre note del laboratorio persistenti (aggiunta, elenco, eliminazione), salvate in SQLite dallo stesso server;
 - è offerto anche come servizio HTTP senza stato (Starlette + uvicorn): ogni richiesta porta la cronologia e
   chi chiama la custodisce;
+- offre un back-end che conserva più conversazioni in PostgreSQL attorno all'agente HTTP senza stato
+  (`python avvia.py --backend`);
 - si avvia anche con Docker Compose.
 
 ## Confini
