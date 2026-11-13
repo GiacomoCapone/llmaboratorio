@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Assistente del laboratorio</title>
+<link rel="stylesheet" href="stile.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<aside id="pannello-elenco">
+  <button id="nuova" type="button" class="primario">+ Nuova conversazione</button>
+  <p id="errore-elenco" class="errore-elenco" hidden></p>
+  <ul id="elenco"></ul>
+</aside>
+<main>
+  <header>
+    <button id="mostra-elenco" type="button" class="secondario">Conversazioni</button>
+    <h1 id="titolo">Assistente del laboratorio</h1>
+    <button id="elimina" type="button" class="pericolo" hidden>Elimina</button>
+  </header>
+  <section id="messaggi" aria-live="polite"></section>
+  <form id="modulo">
+    <ul id="menu" hidden></ul>
+    <textarea id="casella" rows="2" placeholder="Scrivi una domanda o un comando /… (Invio invia, Maiusc+Invio va a capo)"></textarea>
+    <button id="invia" type="submit" class="primario">Invia</button>
+  </form>
+</main>
+</body>
+</html>

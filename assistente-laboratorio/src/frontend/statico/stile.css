@@ -1,0 +1,135 @@
+/* Stile della pagina delle conversazioni: sobrio, font di sistema, nessuna risorsa esterna. */
+:root {
+  --sfondo: #f4f5f7;
+  --pannello: #fafbfc;
+  --carta: #ffffff;
+  --bordo: #d5d8de;
+  --testo: #1f2329;
+  --tenue: #6b7280;
+  --accento: #2563eb;
+  --utente: #e8f0fe;
+  --assistente: #f3f4f6;
+  --errore: #b91c1c;
+  --errore-sfondo: #fef2f2;
+  --info-sfondo: #f0f9ff;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; margin: 0; }
+
+body {
+  display: flex;
+  background: var(--sfondo);
+  color: var(--testo);
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+button { font: inherit; cursor: pointer; border-radius: 6px; padding: 6px 12px; border: 1px solid transparent; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+.primario { background: var(--accento); color: #fff; }
+.secondario { background: var(--carta); color: var(--testo); border-color: var(--bordo); }
+.pericolo { background: var(--carta); color: var(--errore); border-color: var(--bordo); }
+
+/* Elenco delle conversazioni */
+#pannello-elenco {
+  width: 270px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--pannello);
+  border-right: 1px solid var(--bordo);
+  overflow-y: auto;
+}
+#elenco { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+#elenco button {
+  width: 100%;
+  text-align: left;
+  background: none;
+  color: var(--testo);
+  padding: 6px 8px;
+}
+#elenco button:hover { background: var(--assistente); }
+#elenco button.aperta { background: var(--utente); }
+#elenco .voce-titolo { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+#elenco .voce-ora { display: block; color: var(--tenue); font-size: 12px; }
+.errore-elenco { color: var(--errore); font-size: 13px; margin: 0; }
+
+/* Chat */
+main { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--carta); }
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--bordo);
+}
+header h1 { flex: 1; margin: 0; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#mostra-elenco { display: none; }
+
+#messaggi {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.messaggio {
+  max-width: 75%;
+  padding: 8px 12px;
+  border-radius: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.messaggio .ora { display: block; color: var(--tenue); font-size: 11px; }
+.messaggio.utente { align-self: flex-end; background: var(--utente); }
+.messaggio.assistente { align-self: flex-start; background: var(--assistente); }
+.messaggio.provvisorio { opacity: .7; }
+.attesa { align-self: flex-start; color: var(--tenue); font-style: italic; border: 1px dashed var(--bordo); border-radius: 10px; padding: 8px 12px; }
+.avviso { align-self: stretch; white-space: pre-wrap; border-radius: 8px; padding: 8px 12px; font-size: 14px; }
+.avviso.errore { color: var(--errore); background: var(--errore-sfondo); }
+.avviso.info { background: var(--info-sfondo); }
+.invito { margin: auto; color: var(--tenue); text-align: center; max-width: 420px; }
+
+/* Casella e menu dei comandi */
+#modulo { position: relative; display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--bordo); }
+#casella {
+  flex: 1;
+  resize: vertical;
+  min-height: 42px;
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--bordo);
+  border-radius: 6px;
+}
+#casella:disabled { background: var(--assistente); }
+#invia { align-self: flex-end; }
+#menu {
+  position: absolute;
+  left: 16px;
+  bottom: 100%;
+  margin: 0 0 4px;
+  padding: 4px 0;
+  list-style: none;
+  min-width: 320px;
+  max-width: calc(100% - 32px);
+  background: var(--carta);
+  border: 1px solid var(--bordo);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .08);
+  font-size: 14px;
+}
+#menu li { padding: 6px 12px; cursor: pointer; }
+#menu li:first-child, #menu li:hover { background: var(--utente); }
+#menu li.non-disponibile { color: var(--errore); cursor: default; background: none; }
+
+/* Finestre strette: l'elenco si apre col pulsante «Conversazioni» */
+@media (max-width: 700px) {
+  #mostra-elenco { display: inline-block; }
+  #pannello-elenco { display: none; position: fixed; inset: 0 auto 0 0; z-index: 2; box-shadow: 2px 0 12px rgba(0, 0, 0, .15); }
+  body.elenco-aperto #pannello-elenco { display: flex; }
+  .messaggio { max-width: 90%; }
+}

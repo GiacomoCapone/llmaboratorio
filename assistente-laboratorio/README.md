@@ -289,7 +289,7 @@ python avvia.py --http
 ```
 Ascolta su `http://127.0.0.1:8000` (`HTTP_HOST`, `HTTP_PORTA`). Configurazione, modello e archivio sono
 verificati prima dell'avvio: un errore stampa `Errore: ...` ed esce con 1, come per la CLI. Un argomento
-diverso da `--http` e `--backend` stampa `Uso: python avvia.py [--http | --backend]` ed esce con 2. Righe di log (`LOG_LEVEL=INFO`, su
+diverso da `--http`, `--backend` e `--frontend` stampa `Uso: python avvia.py [--http | --backend | --frontend]` ed esce con 2. Righe di log (`LOG_LEVEL=INFO`, su
 stderr): `servizio in ascolto su http://127.0.0.1:8000`, `turno: <n> messaggi in ingresso, <s> s`,
 `prompt: <nome> <argomenti>`, `WARNING ... turno fallito: <causa>`.
 
@@ -459,6 +459,62 @@ avuto 502 (`Connection refused`: l'agente è ancora in avvio, atteso), mentre do
 prova il modello ha risposto «mercoledì» a «Che giorno è oggi?» mentre era venerdì: errore del modello, non del
 back-end. Il comando `docker compose stop backend agente` lascia attivo `postgres`.
 
+## Front-end (pagina web)
+Una pagina web per usare le conversazioni del back-end senza terminale: elenco delle conversazioni a sinistra (la
+più recente in cima, «+ Nuova conversazione»), chat a destra con l'ora di ogni messaggio, «Elimina» con conferma.
+È scritta in HTML, CSS e JavaScript semplici, senza build né librerie esterne (funziona anche senza Internet), in
+`src/frontend/statico/`. Un piccolo servizio Starlette (`src/frontend/app.py`) serve i tre file e **inoltra ogni
+richiesta `/api/...` al back-end** (`/api/conversazioni` → `BACKEND_URL/conversazioni`): pagina e API hanno la
+stessa origine, quindi il back-end non ha bisogno di CORS. Il front-end non importa `assistente` né `backend`.
+Ascolta solo su `127.0.0.1`, senza autenticazione.
+
+### Avvio locale
+Servono il back-end e l'agente (in locale o con `docker compose up -d postgres agente backend`); il front-end
+parte anche senza, e la loro assenza compare nella pagina come errore 502. In un'altra finestra:
+```powershell
+python avvia.py --frontend
+```
+Poi aprire `http://127.0.0.1:8002` nel browser. Variabili (tutte facoltative, nel `.env` o nell'ambiente):
+`BACKEND_URL` (`http://127.0.0.1:8001`), `BACKEND_TIMEOUT` (`960` s, più dell'`AGENTE_TIMEOUT` del back-end così
+l'errore del back-end arriva prima), `FRONTEND_HOST` (`127.0.0.1`), `FRONTEND_PORTA` (`8002`), `LOG_LEVEL`.
+Una porta non valida stampa `Errore: FRONTEND_PORTA deve essere un intero fra 1 e 65535, trovato '...'.` ed esce
+con 1. Nel log: `frontend in ascolto su http://127.0.0.1:8002` e, se il back-end non risponde,
+`WARNING frontend back-end non disponibile: <causa>`.
+
+### Uso della pagina
+- **Invio** invia, **Maiusc+Invio** va a capo. Scrivendo senza aver aperto una conversazione se ne crea una.
+- Durante un turno compare «L'assistente sta rispondendo… (m:ss)» e la casella resta bloccata: **un turno alla
+  volta per pagina**; si possono intanto aprire le altre conversazioni.
+- **Comandi dei prompt** come nella CLI: `/scheda_articolo MIS-001`; digitando `/` compare il menu dei comandi (Tab
+  completa, Esc chiude); `/prompt` mostra l'elenco nella chat senza salvarlo. Un comando sbagliato dà subito lo
+  stesso errore della CLI (`Errore: /scheda_articolo richiede: <codice>.`) senza chiamare il back-end.
+- **Errori** (409 turno in corso, 502 agente o back-end non disponibile, 500, ...): avviso rosso nella chat con il
+  testo del back-end e «Il messaggio non è stato salvato.»; la domanda resta nella casella per riprovare. Se la
+  risposta non arriva dal back-end (rete, o 502 `back-end non disponibile`) il turno potrebbe essere stato salvato
+  comunque: l'avviso dice di riaprire la conversazione per controllare.
+- Le risposte sono mostrate come testo semplice (niente Markdown o HTML).
+- **Ricaricare la pagina durante un turno** non lo interrompe: il back-end lo completa e la risposta compare
+  riaprendo la conversazione quando è pronta.
+
+### Lista di controllo manuale
+Il JavaScript non ha test automatici (servirebbe Node o un browser pilotato, dipendenze non concordate): dopo una
+modifica alla pagina provare nel browser, con PostgreSQL, agente, back-end e LM Studio attivi: nuova conversazione;
+domanda con attesa e cronometro; risposta e titolo aggiornato nell'elenco; menu `/` e Tab; `/scheda_articolo`
+senza codice, `/boh`, `/prompt`; `/scheda_articolo MIS-001`; riapertura identica; 409 (un turno avviato da
+un'altra scheda sulla stessa conversazione); una domanda con `<b>` mostrata come testo; ricarica durante un turno;
+eliminazione con conferma; back-end spento (502, domanda conservata); console del browser senza errori.
+
+Verificato il 2026-11-13 (`google/gemma-4-e2b`, `docker compose up -d postgres agente backend` più
+`python avvia.py --frontend`) pilotando Edge in modalità headless con uno script locale (Chrome DevTools Protocol,
+non versionato): tutte le voci della lista sopra hanno dato l'esito atteso, compresi il 409 da una seconda richiesta,
+la ricarica durante un turno (risposta presente riaprendo, 8 messaggi) e il back-end fermato con
+`docker compose stop backend` (avviso «back-end non disponibile: All connection attempts failed», domanda rimasta
+nella casella); nessuna eccezione JavaScript né errore di console. Con un back-end finto sono stati provati anche un
+turno fallito mentre era aperta un'altra conversazione (la pagina torna alla conversazione del turno e mostra lì
+l'avviso) e un comando inviato mentre i prompt si ricaricavano (va alla conversazione di partenza). **Non provati**:
+un browser reale con interfaccia (solo headless), la vista sotto i 700 px, Ctrl-C su `python avvia.py --frontend`
+(i processi sono stati chiusi con `Stop-Process`).
+
 ## Strumenti
 Il modello li richiede tramite tool calling; il programma li esegue davvero (registro in
 `src/assistente/strumenti/`).
@@ -573,7 +629,7 @@ non si usano: verso l'archivio si usa solo lo stdio. `pywin32` è solo per Windo
 ```powershell
 .venv\Scripts\python.exe -m pytest
 ```
-I test non richiedono un modello attivo né Internet (esito verificato il 2026-11-13: 806 passati, 51
+I test non richiedono un modello attivo né Internet (esito verificato il 2026-11-13: 867 passati, 51
 deselezionati: `reale`, `rete` e `postgres`).
 
 Prove del back-end con PostgreSQL vero (senza modello; escluse di default, marcatore `postgres`): richiedono il
@@ -838,6 +894,11 @@ Suite reale completa del passo (stesso comando della sezione dello step 6, esegu
 e riassunto; in più rispetto allo step 6 `test_riassunto_conserva_la_nota`, instabile dallo step 4), 1 xpassed, 1531 s.
 
 ## Diagnosi
+- **Pagina: 502 `back-end non disponibile: ...`** (nell'elenco o in un avviso): il front-end non raggiunge il
+  back-end. Avviarlo (`python avvia.py --backend` o `docker compose up -d postgres agente backend`) e controllare
+  `BACKEND_URL`. Con un 502 `agente non disponibile: ...` il back-end risponde ma l'agente è spento o ancora in
+  avvio; con `Comandi non disponibili: ...` digitando `/` i prompt non sono stati letti (stesse cause): la pagina
+  riprova al successivo comando `/`.
 - **Back-end: `Errore: database non raggiungibile: ...`** all'avvio di `python avvia.py --backend`: PostgreSQL non è
   attivo o `DATABASE_URL` è sbagliato. Avviare il database (`docker compose up -d postgres`) e controllare che
   `DATABASE_URL` abbia la porta **5433** e lo stesso utente, la stessa password e lo stesso nome di

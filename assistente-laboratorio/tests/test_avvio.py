@@ -36,6 +36,22 @@ def test_avvia_senza_pythonpath_da_un_altra_cartella(tmp_path):
     assert "ModuleNotFoundError" not in esito.stderr
 
 
+def test_avvia_frontend_configurazione_non_valida(tmp_path):
+    ambiente = ambiente_senza_configurazione()
+    ambiente["FRONTEND_PORTA"] = "abc"
+    esito = subprocess.run(
+        [sys.executable, str(AVVIA), "--frontend"],
+        cwd=tmp_path,
+        env=ambiente,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert esito.returncode == 1
+    assert "FRONTEND_PORTA" in esito.stderr
+    assert "ModuleNotFoundError" not in esito.stderr
+
+
 BASE = getattr(sys, "_base_executable", sys.executable)
 
 

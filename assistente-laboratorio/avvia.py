@@ -39,6 +39,10 @@ try:
         from backend.__main__ import main
 
         argomenti = []
+    elif sys.argv[1:] == ["--frontend"]:
+        from frontend.__main__ import main
+
+        argomenti = []
     else:
         from assistente.cli import main
 

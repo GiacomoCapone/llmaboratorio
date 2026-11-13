@@ -13,6 +13,9 @@ La cartella del progetto è `assistente-laboratorio/`.
 - `src/backend/`: back-end delle conversazioni (PostgreSQL, API JSON, chiama l'agente `--http`); non importa
   `assistente` né `archivio`. Avvio: `python avvia.py --backend` (serve PostgreSQL e `DATABASE_URL` nel `.env`);
   con Docker: `docker compose up -d postgres agente backend` (richiede `POSTGRES_*` nel `.env`).
+- `src/frontend/`: pagina web (HTML/CSS/JS senza build in `statico/`) servita da Starlette, che inoltra `/api/...` al
+  back-end; non importa `assistente`, `backend` né `archivio`. Avvio: `python avvia.py --frontend`
+  (`http://127.0.0.1:8002`, `BACKEND_URL`). Il JavaScript non ha test automatici: si prova nel browser.
 - `dati/`: database SQLite delle note del laboratorio (`note.db`), creato al primo avvio, fuori da Git e da
   Docker; in Docker è montato su `/app/dati`.
 - Test automatici (senza modello): `python -m pytest`.
@@ -55,11 +58,14 @@ Un'applicazione da terminale in Python che conversa con un modello locale e:
   chi chiama la custodisce;
 - offre un back-end che conserva più conversazioni in PostgreSQL attorno all'agente HTTP senza stato
   (`python avvia.py --backend`);
+- offre una pagina web (HTML/CSS/JS senza build) per usare le conversazioni del back-end
+  (`python avvia.py --frontend`);
 - si avvia anche con Docker Compose.
 
 ## Confini
 - Implementare solo i requisiti concordati.
-- Niente interfacce grafiche, servizi cloud o framework non concordati.
+- Niente servizi cloud o framework non concordati; l'unica interfaccia grafica è la pagina web di `src/frontend/`
+  (HTML/CSS/JS senza build).
 - Lavorare solo dentro `assistente-laboratorio/`. La repository contiene altre lezioni:
   non leggerle per copiarne il codice e non modificarle.
 - Lavorare nel branch corrente; nessun branch o worktree nuovo se non richiesto.

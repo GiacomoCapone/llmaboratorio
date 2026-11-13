@@ -712,7 +712,7 @@ def test_main_argomento_sconosciuto(monkeypatch, capsys):
         "assistente.servizio.servi", lambda config: pytest.fail("servi non va chiamata")
     )
     assert main(["--boh"]) == 2
-    assert "Uso: python avvia.py [--http | --backend]" in capsys.readouterr().err
+    assert "Uso: python avvia.py [--http | --backend | --frontend]" in capsys.readouterr().err
 
 
 def test_main_http_errore_di_avvio(monkeypatch, capsys):

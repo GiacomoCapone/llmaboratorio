@@ -31,7 +31,7 @@ def servi(config: ConfigBackend) -> None:
 def main(argv: list[str] | None = None) -> int:
     argv = [] if argv is None else argv
     if argv:
-        print("Uso: python avvia.py [--http | --backend]", file=sys.stderr)
+        print("Uso: python avvia.py [--http | --backend | --frontend]", file=sys.stderr)
         return 2
     try:
         impostazioni = carica_config()

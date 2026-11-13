@@ -71,7 +71,7 @@ def test_main_configurazione_non_valida(monkeypatch, capsys):
 
 def test_main_argomenti(capsys):
     assert avvio.main(["x"]) == 2
-    assert capsys.readouterr().err.strip() == "Uso: python avvia.py [--http | --backend]"
+    assert capsys.readouterr().err.strip() == "Uso: python avvia.py [--http | --backend | --frontend]"
 
 
 def test_main_ctrl_c(monkeypatch, capsys):
