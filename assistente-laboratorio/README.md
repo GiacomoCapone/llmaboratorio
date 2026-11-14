@@ -79,8 +79,8 @@ tutte nel `.env`:
 
 Da quando `compose.yaml` ha il servizio `postgres`, **Compose richiede `POSTGRES_USER`, `POSTGRES_DB` e
 `POSTGRES_PASSWORD` nel `.env` per qualunque comando**, anche per `docker compose run --rm assistente`
-(la sostituzione `${POSTGRES_...:?}` fa fallire il comando se mancano). Il percorso `docker compose run --rm
-assistente` con queste variabili presenti non è stato riprovato dopo lo step 7.
+(la sostituzione `${POSTGRES_...:?}` fa fallire il comando se mancano). Con queste variabili presenti
+`docker compose run --rm -T assistente` è stato riprovato il 2026-11-14 (vedi «Applicazione completa con Docker Compose»).
 
 `LMSTUDIO_REASONING_EFFORT` regola il ragionamento nascosto del modello: con `none` ogni chiamata
 dura pochi secondi; `low` (o superiore) può rendere più affidabile la scelta dello strumento con
@@ -444,17 +444,21 @@ Il servizio `postgres` (immagine `postgres:18.7`, porta pubblicata solo sull'hos
 volume con nome `pgdati`, quindi conservati fra un avvio e l'altro) e il servizio `backend` (stessa immagine
 del progetto, `127.0.0.1:8001`, `DATABASE_URL` costruito da Compose con `POSTGRES_*` e host `postgres`, `AGENTE_URL`
 `http://agente:8000`) si usano in secondo piano con l'agente:
+L'applicazione completa con la pagina web si avvia con `docker compose up -d --wait` (vedi «Applicazione completa
+con Docker Compose»); per i soli tre servizi:
 ```powershell
 docker compose build
-docker compose up -d postgres agente backend
+docker compose up -d --wait postgres agente backend
 Invoke-RestMethod http://127.0.0.1:8001/salute
 docker compose logs backend
 docker compose restart backend
 docker compose stop backend agente
 ```
-Verificato il 2026-11-13: build riuscita e avvio dei tre servizi; un messaggio inviato **subito** dopo l'avvio ha
-avuto 502 (`Connection refused`: l'agente è ancora in avvio, atteso), mentre dopo la risposta di `/salute` dell'agente
-(porta 8000) lo stesso messaggio ha dato 200 in 30 s; dopo `docker compose restart backend` la conversazione 2
+Verificato il 2026-11-13 (allora senza controlli di salute e senza `--wait`): build riuscita e avvio dei tre
+servizi; un messaggio inviato **subito** dopo l'avvio ha avuto 502 (`Connection refused`: l'agente era ancora in
+avvio), mentre dopo la risposta di `/salute` dell'agente (porta 8000) lo stesso messaggio ha dato 200 in 30 s. Dal
+2026-11-14 il back-end parte solo quando l'agente risponde a `/salute` (vedi «Applicazione completa con Docker
+Compose») e il 502 iniziale non si presenta; dopo `docker compose restart backend` la conversazione 2
 (titolo «Che giorno è oggi?», 2 messaggi) era ancora presente grazie al volume; l'arresto ha dato uscita 0. In quella
 prova il modello ha risposto «mercoledì» a «Che giorno è oggi?» mentre era venerdì: errore del modello, non del
 back-end. Il comando `docker compose stop backend agente` lascia attivo `postgres`.
@@ -469,7 +473,8 @@ stessa origine, quindi il back-end non ha bisogno di CORS. Il front-end non impo
 Ascolta solo su `127.0.0.1`, senza autenticazione.
 
 ### Avvio locale
-Servono il back-end e l'agente (in locale o con `docker compose up -d postgres agente backend`); il front-end
+Con Docker l'intera applicazione, pagina compresa, si avvia con `docker compose up -d --wait` (vedi «Applicazione
+completa con Docker Compose»). In locale servono il back-end e l'agente; il front-end
 parte anche senza, e la loro assenza compare nella pagina come errore 502. In un'altra finestra:
 ```powershell
 python avvia.py --frontend
@@ -629,8 +634,10 @@ non si usano: verso l'archivio si usa solo lo stdio. `pywin32` è solo per Windo
 ```powershell
 .venv\Scripts\python.exe -m pytest
 ```
-I test non richiedono un modello attivo né Internet (esito verificato il 2026-11-13: 867 passati, 51
-deselezionati: `reale`, `rete` e `postgres`).
+I test non richiedono un modello attivo né Internet (esito verificato il 2026-11-14: 880 passati, 51
+deselezionati: `reale`, `rete` e `postgres`). `tests/test_compose.py` legge `compose.yaml` (servizi, profilo `cli`,
+porte solo su `127.0.0.1`, dipendenze, controlli di salute) ed esegue il comando di salute vero contro un server
+locale che risponde 200, 500 o non risponde: non serve Docker.
 
 Prove del back-end con PostgreSQL vero (senza modello; escluse di default, marcatore `postgres`): richiedono il
 servizio `postgres` attivo e `DATABASE_URL` nel `.env`; ogni prova lavora in uno schema temporaneo, creato e
@@ -647,6 +654,58 @@ Prova con Open-Meteo vero (Internet, senza modello; esclusa di default, marker `
 .venv\Scripts\python.exe -m pytest -m rete -v
 ```
 Esito del 2026-11-09, eseguito da PowerShell: 2 passati.
+
+## Applicazione completa con Docker Compose
+Con un solo comando si avviano, in quest'ordine e ciascuno solo quando quelli da cui dipende **rispondono**:
+`postgres` → `agente` → `backend` → `frontend`. LM Studio resta sull'host e dev'essere attivo (vedi sotto).
+```powershell
+docker compose build
+docker compose up -d --wait
+docker compose ps
+```
+Poi aprire `http://127.0.0.1:8002`. `--wait` fa tornare il comando quando i quattro servizi sono `healthy`
+(uscita 0) o quando uno di essi non può partire (uscita 1). Arresto: `docker compose down` (le conversazioni restano
+nel volume `pgdati`; `docker compose down -v` le cancellerebbe).
+
+| Servizio | Porta sull'host | Controllo di salute |
+| --- | --- | --- |
+| `postgres` | `127.0.0.1:5433` | `pg_isready` |
+| `agente` | `127.0.0.1:8000` | `GET /salute` |
+| `backend` | `127.0.0.1:8001` | `GET /salute` |
+| `frontend` | `127.0.0.1:8002` | `GET /` |
+
+Tutte le porte sono pubblicate solo sull'host locale. I controlli di salute usano il Python dell'immagine (la slim non
+ha `curl`) ogni 5 s, fino a 10 tentativi dopo 10 s di avvio; «sano» vuol dire «il processo risponde»: `/salute` non
+interroga né LM Studio né il database. Nel container `BACKEND_URL` del front-end vale `http://backend:8001` e prevale
+sul `.env`, come `DATABASE_URL` e `AGENTE_URL` per il back-end; anche le porte interne (`HTTP_PORTA`,
+`BACKEND_PORTA`, `FRONTEND_PORTA`) sono fissate in `compose.yaml`, quindi un valore diverso nel `.env` vale solo per
+l'avvio locale (in Docker la porta dell'host si cambia nella parte sinistra di `ports`).
+
+La CLI interattiva è nel profilo `cli`, quindi `docker compose up` non la avvia; si usa come prima:
+```powershell
+docker compose run --rm assistente
+```
+
+**Senza LM Studio** l'agente esce all'avvio (`Errore: Server non raggiungibile all'indirizzo ...`, visibile con
+`docker compose logs agente`), `up -d --wait` esce con 1 e back-end e front-end non partono, perché attendono un
+agente sano. Per consultare comunque le conversazioni salvate:
+```powershell
+docker compose up -d --no-deps --wait postgres backend frontend
+```
+La pagina mostra le conversazioni; un nuovo messaggio dà `agente non disponibile: ...` (502) e non viene salvato.
+
+Verificato il 2026-11-14 (`google/gemma-4-e2b`, da Git Bash e PowerShell): `docker compose config --quiet` e
+`docker compose build` con uscita 0; `docker compose up -d --wait` con uscita 0 in 26 s, i quattro servizi `healthy`
+in `docker compose ps` e `assistente` assente; `/salute` di agente e back-end e `/` del front-end con 200. Sulla
+pagina, pilotata in Edge headless con lo script locale dello step 8 (non versionato), tutte le voci della «Lista di
+controllo manuale» hanno dato l'esito atteso, compreso il 502 con `docker compose stop backend`; una sonda separata
+non ha trovato eccezioni JavaScript al caricamento, alla ricarica e con i comandi locali. Da PowerShell
+`"Che ore sono a Roma?", "esci" | docker compose run --rm -T assistente` ha chiamato `ora_corrente` con
+`Europe/Rome` e risposto con l'ora corretta (uscita 0). Una conversazione con un turno vero era ancora presente, con
+i suoi 2 messaggi, dopo `docker compose down` e `docker compose up -d --wait`. Con LM Studio irraggiungibile
+(indirizzo dell'agente su una porta chiusa, con un file di override temporaneo) si è avuto il comportamento descritto
+sopra, compreso il ripiego con `--no-deps`. **Non provati**: lo spegnimento vero di LM Studio (simulato con
+l'indirizzo sbagliato) e `docker compose run --rm assistente` senza `-T`, con terminale.
 
 ## Docker: verificato e da verificare
 Su Python 3.14 sono verificati: l'installazione di `requirements.txt` in un `.venv` locale, i test
@@ -908,11 +967,16 @@ e riassunto; in più rispetto allo step 6 `test_riassunto_conserva_la_nota`, ins
 - **Back-end: porta 5432 occupata o database sbagliato**: sul computer di sviluppo la 5432 è di un servizio PostgreSQL
   di Windows, per questo il servizio `postgres` è pubblicato sulla 5433. Con `DATABASE_URL` sulla 5432 si raggiunge
   quel PostgreSQL, non il container, e l'accesso fallisce.
+- **Compose: `up -d --wait` esce con `dependency failed to start: container ...-agente-1 exited (1)`** (back-end e
+  front-end `not started: condition "service_healthy" of service "agente" not met`): quasi sempre LM Studio è spento
+  o il modello non è caricato; la causa è in `docker compose logs agente`. Avviare LM Studio e ripetere il comando,
+  oppure usare il ripiego con `--no-deps` di «Applicazione completa con Docker Compose».
 - **Compose: errore sulla variabile `POSTGRES_...` mancante** (messaggio non riprodotto) anche per
   `docker compose run --rm assistente`: mancano `POSTGRES_USER`, `POSTGRES_DB` o `POSTGRES_PASSWORD` nel `.env`; servono per qualunque comando Compose.
-- **Back-end: 502 `agente non disponibile: ...`**: l'agente non risponde. Subito dopo `docker compose up -d` è
-  normale, perché l'agente impiega qualche secondo ad avviarsi (apre l'archivio e controlla il modello): attendere
-  che `Invoke-RestMethod http://127.0.0.1:8000/salute` risponda e ripetere il messaggio. Con l'agente spento
+- **Back-end: 502 `agente non disponibile: ...`**: l'agente non risponde. Con `docker compose up -d --wait` il
+  back-end parte solo dopo che l'agente risponde, quindi all'avvio non succede; avviando i servizi a mano può
+  succedere nei primi secondi, perché l'agente impiega qualche secondo ad avviarsi (apre l'archivio e controlla il
+  modello): attendere che `Invoke-RestMethod http://127.0.0.1:8000/salute` risponda e ripetere il messaggio. Con l'agente spento
   (`[WinError 10061]`, `Connection refused`) avviarlo con `python avvia.py --http` o `docker compose up -d agente`.
   Un turno più lungo di `AGENTE_TIMEOUT` dà lo stesso 502. Nulla viene salvato e la conversazione resta libera;
   la causa è anche nel log `WARNING ... agente non disponibile`.

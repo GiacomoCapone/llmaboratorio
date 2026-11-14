@@ -1,5 +1,7 @@
 services:
   assistente:
+    # CLI interattiva: fuori da `docker compose up`, si avvia con `docker compose run --rm assistente`
+    profiles: ["cli"]
     build: .
     stdin_open: true
     tty: true
@@ -24,6 +26,8 @@ services:
       NOTE_DB: /app/dati/note.db
       # Dentro il container il servizio deve ascoltare su tutte le interfacce
       HTTP_HOST: 0.0.0.0
+      # Porta fissa: mappatura, AGENTE_URL e controllo di salute la presumono (prevale sul .env)
+      HTTP_PORTA: "8000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -31,6 +35,13 @@ services:
     ports:
       # Pubblicata solo sull'host locale
       - "127.0.0.1:8000:8000"
+    healthcheck:
+      # Sano = il processo risponde (non interroga LM Studio né il database); la slim non ha curl
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/salute', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   backend:
     build: .
@@ -42,14 +53,48 @@ services:
       AGENTE_URL: http://agente:8000
       # Dentro il container il servizio deve ascoltare su tutte le interfacce
       BACKEND_HOST: 0.0.0.0
+      # Porta fissa: mappatura, BACKEND_URL e controllo di salute la presumono (prevale sul .env)
+      BACKEND_PORTA: "8001"
     ports:
       # Pubblicata solo sull'host locale
       - "127.0.0.1:8001:8001"
+    healthcheck:
+      # Sano = il processo risponde (non interroga LM Studio né il database); la slim non ha curl
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/salute', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     depends_on:
       postgres:
         condition: service_healthy
       agente:
-        condition: service_started
+        condition: service_healthy
+
+  frontend:
+    build: .
+    command: ["python", "-m", "frontend"]
+    env_file: .env
+    environment:
+      # Sovrascrive il valore dell'.env locale: dal container il back-end è il servizio backend
+      BACKEND_URL: http://backend:8001
+      # Dentro il container il servizio deve ascoltare su tutte le interfacce
+      FRONTEND_HOST: 0.0.0.0
+      # Porta fissa: mappatura e controllo di salute la presumono (prevale sul .env)
+      FRONTEND_PORTA: "8002"
+    ports:
+      # Pubblicata solo sull'host locale
+      - "127.0.0.1:8002:8002"
+    healthcheck:
+      # Sano = il processo risponde (non interroga LM Studio né il database); la slim non ha curl
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    depends_on:
+      backend:
+        condition: service_healthy
 
   postgres:
     image: postgres:18.7
